@@ -1,0 +1,94 @@
+<?xml version="1.0"?>
+<SqlWorkbenchSqlProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" Name="Columnstore">
+  <Items>
+    <LogicalFolder Name="Connections" Type="2" Sorted="true">
+      <Items>
+        <ConnectionNode Name="(local):21L-LTPABL-1187\Ajay">
+          <Created>2023-12-07T20:55:22.4925961+05:30</Created>
+          <Type>SQL</Type>
+          <Server>(local)</Server>
+          <UserName />
+          <Authentication>Windows Authentication</Authentication>
+          <InitialDB />
+          <LoginTimeout>30</LoginTimeout>
+          <ExecutionTimeout>0</ExecutionTimeout>
+          <ConnectionProtocol>NotSpecified</ConnectionProtocol>
+          <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
+        </ConnectionNode>
+        <ConnectionNode Name="SqlPractice:21L-LTPABL-1187\Ajay">
+          <Created>2022-11-04T15:37:37.8214759+05:30</Created>
+          <Type>SQL</Type>
+          <Server>SqlPractice</Server>
+          <UserName />
+          <Authentication>Windows Authentication</Authentication>
+          <InitialDB>DBA</InitialDB>
+          <LoginTimeout>30</LoginTimeout>
+          <ExecutionTimeout>0</ExecutionTimeout>
+          <ConnectionProtocol>NotSpecified</ConnectionProtocol>
+          <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
+        </ConnectionNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Queries" Type="0" Sorted="true">
+      <Items>
+        <FileNode Name="0) Introductions and Overview.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>0) Introductions and Overview.sql</FullPath>
+        </FileNode>
+        <FileNode Name="1) Fundamentals-of-Columnstore--How-the-Data-is-Stored.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>1) Fundamentals-of-Columnstore--How-the-Data-is-Stored.sql</FullPath>
+        </FileNode>
+        <FileNode Name="2) Fundamentals-of-Columnstore---How-Data-is-Deleted,-Updated,-and-Inserted.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>2) Fundamentals-of-Columnstore---How-Data-is-Deleted,-Updated,-and-Inserted.sql</FullPath>
+        </FileNode>
+        <FileNode Name="3) Fundamentals-of-Columnstore---How-Data-is-Selected.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>3) Fundamentals-of-Columnstore---How-Data-is-Selected.sql</FullPath>
+        </FileNode>
+        <FileNode Name="4) Fundamentals-of-Columnstore---How-Data-is-Rebuilt.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>4) Fundamentals-of-Columnstore---How-Data-is-Rebuilt.sql</FullPath>
+        </FileNode>
+        <FileNode Name="5) Fundamentals-of-Columnstore---Nonclustered-Columnstore-Advantages.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>5) Fundamentals-of-Columnstore---Nonclustered-Columnstore-Advantages.sql</FullPath>
+        </FileNode>
+        <FileNode Name="6) Fundamentals-of-Columnstore---A-Bigger,-Better-Clustered-Columnstore-Candidate.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>6) Fundamentals-of-Columnstore---A-Bigger,-Better-Clustered-Columnstore-Candidate.sql</FullPath>
+        </FileNode>
+        <FileNode Name="7a) Fundamentals-of-Columnstore---Partitioning-Is-a-Great-Partner-for-Columnstore.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>7a) Fundamentals-of-Columnstore---Partitioning-Is-a-Great-Partner-for-Columnstore.sql</FullPath>
+        </FileNode>
+        <FileNode Name="7b) Fundamentals-of-Columnstore---Partitioning-Is-a-Great-Partner-for-Columnstore.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>7b) Fundamentals-of-Columnstore---Partitioning-Is-a-Great-Partner-for-Columnstore.sql</FullPath>
+        </FileNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Miscellaneous" Type="3" Sorted="true">
+      <Items />
+    </LogicalFolder>
+  </Items>
+</SqlWorkbenchSqlProject>

@@ -1,0 +1,407 @@
+<?xml version="1.0"?>
+<SqlWorkbenchSqlProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" Name="StackOverflow">
+  <Items>
+    <LogicalFolder Name="Connections" Type="2" Sorted="true">
+      <Items>
+        <ConnectionNode Name="(local):21L-LTPABL-1187\Ajay">
+          <Created>2022-12-12T18:55:37.8848245+05:30</Created>
+          <Type>SQL</Type>
+          <Server>(local)</Server>
+          <UserName />
+          <Authentication>Windows Authentication</Authentication>
+          <InitialDB>master</InitialDB>
+          <LoginTimeout>30</LoginTimeout>
+          <ExecutionTimeout>0</ExecutionTimeout>
+          <ConnectionProtocol>NotSpecified</ConnectionProtocol>
+          <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
+        </ConnectionNode>
+        <ConnectionNode Name="localhost:21L-LTPABL-1187\Ajay">
+          <Created>2022-08-21T13:55:22.050874+05:30</Created>
+          <Type>SQL</Type>
+          <Server>localhost</Server>
+          <UserName />
+          <Authentication>Windows Authentication</Authentication>
+          <InitialDB />
+          <LoginTimeout>30</LoginTimeout>
+          <ExecutionTimeout>0</ExecutionTimeout>
+          <ConnectionProtocol>NotSpecified</ConnectionProtocol>
+          <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
+        </ConnectionNode>
+        <ConnectionNode Name="SqlPractice:21L-LTPABL-1187\Ajay">
+          <Created>2022-05-28T15:44:59.7354361+05:30</Created>
+          <Type>SQL</Type>
+          <Server>SqlPractice</Server>
+          <UserName />
+          <Authentication>Windows Authentication</Authentication>
+          <InitialDB />
+          <LoginTimeout>30</LoginTimeout>
+          <ExecutionTimeout>0</ExecutionTimeout>
+          <ConnectionProtocol>NotSpecified</ConnectionProtocol>
+          <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
+        </ConnectionNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Queries" Type="0" Sorted="true">
+      <Items>
+        <FileNode Name="_Find Myself, Brent, Sam, and Others.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:localhost:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>localhost</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>_Find Myself, Brent, Sam, and Others.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Create [dbo].[PostTags] table.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Create [dbo].[PostTags] table.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Generate Workloads.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:localhost:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>localhost</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Generate Workloads.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Help.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:localhost:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>localhost</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Help.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - Find interesting unanswered questions.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - Find interesting unanswered questions.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - High Standards - Top 100 Users that rarely upvote.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - High Standards - Top 100 Users that rarely upvote.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - How many upvotes do I have for each tag.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - How many upvotes do I have for each tag.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - How many upvotes do I have towards tag-specialist badges.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - How many upvotes do I have towards tag-specialist badges.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - How Unsung am I.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - How Unsung am I.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - Low views, high votes yet unanswered.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - Low views, high votes yet unanswered.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - Most controversial posts on the site.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - Most controversial posts on the site.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - My Comment Score distribution.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - My Comment Score distribution.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - StackOverflow Rank and Percentile.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - StackOverflow Rank and Percentile.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - Top 50 Most Prolific Editors.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - Top 50 Most Prolific Editors.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - Top 500 answerers on the site.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - Top 500 answerers on the site.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - Users with highest accept rate of their answers.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - Users with highest accept rate of their answers.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QA - What is my accepted answer percentage rate.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QA - What is my accepted answer percentage rate.sql</FullPath>
+        </FileNode>
+        <FileNode Name="QRY - Clensing StackOverflow Tables.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>QRY - Clensing StackOverflow Tables.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-Low_views_high_votes_yet_unanswered.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-Low_views_high_votes_yet_unanswered.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Bounties_and_Questions_by_Month.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Bounties_and_Questions_by_Month.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Duplicate_Questions_Count_per_Month.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Duplicate_Questions_Count_per_Month.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_find_interesting_unanswered_questions.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_find_interesting_unanswered_questions.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_get_user_comment_score_distribution.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:SqlPractice:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>SqlPractice</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_get_user_comment_score_distribution.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_get_user_score.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_get_user_score.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_get_user_upvotes.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_get_user_upvotes.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Jon_Skeet_comparison.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Jon_Skeet_comparison.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Most_and_least_dangerous_tags_to_answer.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Most_and_least_dangerous_tags_to_answer.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Most_controversial_posts.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Most_controversial_posts.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Most_Down_Voted_Questions.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Most_Down_Voted_Questions.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Most_popular_StackOverflow_tags_4_Duration.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Most_popular_StackOverflow_tags_4_Duration.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_My_Money_for_Jam.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_My_Money_for_Jam.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Posts_containing_a_very_short_title.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:SqlPractice:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>SqlPractice</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Posts_containing_a_very_short_title.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Posts_with_many_thank_you_answers.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Posts_with_many_thank_you_answers.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Questions_Count_by_Month.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Questions_Count_by_Month.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Quickest_badge_earners.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Quickest_badge_earners.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Rising_stars.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Rising_stars.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_The_true_unsung_heros.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_The_true_unsung_heros.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Top_100_Users_that_rarely_upvote.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Top_100_Users_that_rarely_upvote.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Top_50_Most_Prolific_Editors.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Top_50_Most_Prolific_Editors.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Top_500_answerers.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Top_500_answerers.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Top_Users_by_Number_of_Bounties_Won.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Top_Users_by_Number_of_Bounties_Won.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Total_Questions_and_Answers_per_Month.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Total_Questions_and_Answers_per_Month.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_user_accepted_answer_percentage_rate.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_user_accepted_answer_percentage_rate.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_user_StackOverflow_Rank_and_Percentile.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_user_StackOverflow_Rank_and_Percentile.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_users_by_location.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:SqlPractice:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>SqlPractice</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_users_by_location.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Users_by_Popular_Question_ratio.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Users_by_Popular_Question_ratio.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Users_with_duplicate_account_and_1k_reputation.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Users_with_duplicate_account_and_1k_reputation.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Users_with_high_self_accept_rates.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Users_with_high_self_accept_rates.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH - RPT-usp_Vanity_search_links_to_user_website_posted_by_other_people_4_during.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>SCH - RPT-usp_Vanity_search_links_to_user_website_posted_by_other_people_4_during.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Setup-IndexLab6.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:localhost:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>localhost</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Setup-IndexLab6.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Setup-Job-[Restore StackOverflow n StackOverflow2013].sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:localhost:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>localhost</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Setup-Job-[Restore StackOverflow n StackOverflow2013].sql</FullPath>
+        </FileNode>
+        <FileNode Name="Setup-Job-Run-High-MemoryGrant-Query.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Setup-Job-Run-High-MemoryGrant-Query.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Setup-Job-Run-RandomQ.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Setup-Job-Run-RandomQ.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Setup-RandomQ.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Setup-RandomQ.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Setup-ServerLab2.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:SqlPractice:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>SqlPractice</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Setup-ServerLab2.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Setup-ServerLab4.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:SqlPractice:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>SqlPractice</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Setup-ServerLab4.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Setup-ServerLab5.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:SqlPractice:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>SqlPractice</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Setup-ServerLab5.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Setup-ServerLab6.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:SqlPractice:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>SqlPractice</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Setup-ServerLab6.sql</FullPath>
+        </FileNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Miscellaneous" Type="3" Sorted="true">
+      <Items>
+        <FileNode Name="Invoke-IndexLab6.ps1">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>Invoke-IndexLab6.ps1</FullPath>
+        </FileNode>
+      </Items>
+    </LogicalFolder>
+  </Items>
+</SqlWorkbenchSqlProject>

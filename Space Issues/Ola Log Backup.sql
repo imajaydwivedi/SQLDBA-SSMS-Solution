@@ -1,0 +1,15 @@
+EXECUTE DBA.[dbo].[DatabaseBackup]
+@Databases = 'USER_DATABASES',
+@Directory = 'E:\Backups',
+@DirectoryStructure = '{DatabaseName}{DirectorySeparator}{BackupType}',
+@AvailabilityGroupDirectoryStructure = '{DatabaseName}{DirectorySeparator}{BackupType}',
+@FileName = '{DatabaseName}_{BackupType}_{Partial}_{CopyOnly}_{Year}{Month}{Day}_{Hour}{Minute}{Second}_{FileNumber}.{FileExtension}',
+@AvailabilityGroupFileName = '{DatabaseName}_{BackupType}_{Partial}_{CopyOnly}_{Year}{Month}{Day}_{Hour}{Minute}{Second}_{FileNumber}.{FileExtension}',
+@OverrideBackupPreference = 'Y',
+@BackupType = 'LOG',
+@ChangeBackupType = 'Y',
+--@Verify = 'Y',
+@CleanupTime = 24,
+--@CheckSum = 'Y',
+@Compress = 'Y',
+@LogToTable = 'Y'

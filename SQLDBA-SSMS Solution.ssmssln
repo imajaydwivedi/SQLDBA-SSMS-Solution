@@ -1,0 +1,160 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# SQL Server Management Studio Solution File, Format Version 18.00
+VisualStudioVersion = 15.0.27428.2015
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "BlitzQueries", "BlitzQueries\BlitzQueries.ssmssqlproj", "{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Backup-Restore", "Backup-Restore\Backup-Restore.ssmssqlproj", "{15CC463C-A8D2-4F91-BF9C-5D8D86E815E2}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "SQL Jobs", "SQL Jobs\SQL Jobs.ssmssqlproj", "{97D05A33-770A-4C00-B526-9FA045863965}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Space Issues", "Space Issues\Space Issues.ssmssqlproj", "{45C2C8C8-EE4A-44F4-B4F7-0A574BC0340D}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "PowerShell Commands", "PowerShell Commands\PowerShell Commands.ssmssqlproj", "{4E8B3D69-1D59-4EAE-BCB7-92BC26C3BA58}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "SQLDBATools-Inventory", "SQLDBATools-Inventory\SQLDBATools-Inventory.ssmssqlproj", "{57FF8DF9-22E7-4ED8-85D3-E23B480BE7BE}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "SpaceCapacity-Automation", "SpaceCapacity-Automation\SpaceCapacity-Automation.ssmssqlproj", "{3EAD2BB5-CA7E-4D64-BEC9-A6E7C95B0CD3}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "SQLAgent-Notifications", "SQLAgent-Notifications\SQLAgent-Notifications.ssmssqlproj", "{819D9E21-3B8F-4503-B098-BE1FD5091B8B}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Misscellaneous Queries", "Misscellaneous Queries\Misscellaneous Queries.ssmssqlproj", "{77970B04-2242-40A2-98C1-A70538432873}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "LogShipping", "LogShipping\LogShipping.ssmssqlproj", "{033BA5C7-B799-40F0-B8BE-741D0E02F34E}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "PermissionIssues", "PermissionIssues\PermissionIssues.ssmssqlproj", "{B511A519-C45A-4122-995C-D82C3CF5BE9C}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "InstanceMigration", "InstanceMigration\InstanceMigration.ssmssqlproj", "{CA8E5EEB-A00E-4E2B-9702-0C1A322AABA1}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Experiments", "Experiments\Experiments.ssmssqlproj", "{87B45E28-8552-4150-B3FC-7EF7A397DC20}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Replication-Transactional", "Replication-Transactional\Replication-Transactional.ssmssqlproj", "{3061CF18-9C99-463A-9171-4CC2AB624B1E}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "SQLTrace", "SQLTrace\SQLTrace.ssmssqlproj", "{49ADEE38-CEB3-4F9D-A157-F6CFAF37A687}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Extended Events", "Extended Events\Extended Events.ssmssqlproj", "{2D2CED0F-54CC-4689-B369-E125AF2DF4ED}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Baselining", "Baselining\Baselining.ssmssqlproj", "{DAB50F5A-426A-4F81-9B01-E7A48FABB538}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Blocking Alert", "Blocking Alert\Blocking Alert.ssmssqlproj", "{0AD76D32-E3F9-4382-9C1A-152E8439B86B}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Deadlock_Detection_SQLTrace", "Deadlock_Detection_SQLTrace\Deadlock_Detection_SQLTrace.ssmssqlproj", "{2A3AE999-5A88-4B57-8812-5F674B2C1E36}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Sep26-Presentation", "Sep26-Presentation\Sep26-Presentation.ssmssqlproj", "{20351268-D56B-4BCF-A2D9-B1EF8E9791F7}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Architecture-Choices-That-Affect-Performance", "Architecture-Choices-That-Affect-Performance\Architecture-Choices-That-Affect-Performance.ssmssqlproj", "{F5F6C8E4-5A14-47D3-83A0-3E4FE233E85A}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "StackOverflow", "StackOverflow\StackOverflow.ssmssqlproj", "{3EC2A162-B1E8-492C-97D4-6C97A7D43E9A}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "TempDb-Issues", "TempDb-Issues\TempDb-Issues.ssmssqlproj", "{EBD80353-46F6-483D-B3A7-B3FC61B016FA}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "ServiceBroker-SingleService", "ServiceBroker-SingleService\ServiceBroker-SingleService.ssmssqlproj", "{FC215972-4485-4B29-82C1-4DDD218D9303}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Self-Service-Module-Signed-Tools", "Self-Service-Module-Signed-Tools\Self-Service-Module-Signed-Tools.ssmssqlproj", "{9B9DD5DB-FCD6-4B9F-9BC0-54DCAF827C99}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Linux", "Linux\Linux.ssmssqlproj", "{4C79BFF5-461D-4BF1-A467-30CC92F3170F}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "SQL-Lab", "SQL-Lab\SQL-Lab.ssmssqlproj", "{F88BA745-0139-4320-94DA-2EE60B0A1D68}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Mail-Replies", "Mail-Replies\Mail-Replies.ssmssqlproj", "{F9719B0E-647E-4BF6-B539-C4749EB02DEC}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Planning-And-Installation", "Planning-And-Installation\Planning-And-Installation.ssmssqlproj", "{0FCD38BE-0145-489F-9164-3B6B584F25AA}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Resource Governor", "Resource Governor\Resource Governor.ssmssqlproj", "{0E5583CE-59E0-46C2-BBA9-1E5EEDC6521C}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "SQLWATCH", "SQLWATCH\SQLWATCH.ssmssqlproj", "{EC08BB0F-8B97-409A-8504-2B6D2E45744B}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Demo", "Demo\Demo.ssmssqlproj", "{73A2B586-BBB3-4B06-8338-3057280C2839}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "VLDB-Shrink", "VLDB-Shrink\VLDB-Shrink.ssmssqlproj", "{9DBE8D07-B02C-4B14-9274-FF2D318432FA}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "TempScripts", "TempScripts\TempScripts.ssmssqlproj", "{2AA8E206-6A25-4890-8FDA-08B61B56AD00}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "ErrorLogs", "ErrorLogs\ErrorLogs.ssmssqlproj", "{5BC08764-DBEC-4148-AD69-4DF9BE6CAFDC}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Projects-Testing", "Projects-Testing\Projects-Testing.ssmssqlproj", "{ABC58D6E-0694-4E25-8FA6-1F1647C9E7D8}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Maintenance", "Maintenance\Maintenance.ssmssqlproj", "{49DFF171-1634-4AA9-AE4C-0CD8C9EBD1A3}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "_SQLDBATools", "_SQLDBATools\_SQLDBATools.ssmssqlproj", "{A1C5E029-364F-458E-AA6B-2F652A31F008}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "xevent_metrics-infra", "xevent_metrics-infra\xevent_metrics-infra.ssmssqlproj", "{25AF6842-FB5B-4988-8A25-FF9C85EDAC5D}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Audit-n-LogOn-Trigger", "Audit-n-LogOn-Trigger\Audit-n-LogOn-Trigger.ssmssqlproj", "{428AB281-827E-41A5-B117-8106AACECE00}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Columnstore", "Columnstore\Columnstore.ssmssqlproj", "{23CF5D08-2C58-49AD-8650-B2FD8588864F}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Private", "Private\Private.ssmssqlproj", "{87873558-1ED6-4DB3-A05F-5E553322E23B}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Sensitive", "Sensitive\Sensitive.ssmssqlproj", "{353F549F-B415-423C-B799-7BBB860D2E52}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Volatile", "Volatile\Volatile.ssmssqlproj", "{9C2E9B51-E79B-4A75-8A65-3535FB29A9CD}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Work", "Work\Work.ssmssqlproj", "{EC149E26-4049-41BA-B92C-571631FDFA0D}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Security", "Security\Security.ssmssqlproj", "{2FEA593A-FFAB-4893-8FC0-D995390E9798}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "HADR", "HADR\HADR.ssmssqlproj", "{4F63B99E-2F65-4EDE-B2B4-295A9AB4FC58}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Default|Default = Default|Default
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}.Default|Default.ActiveCfg = Default
+		{15CC463C-A8D2-4F91-BF9C-5D8D86E815E2}.Default|Default.ActiveCfg = Default
+		{97D05A33-770A-4C00-B526-9FA045863965}.Default|Default.ActiveCfg = Default
+		{45C2C8C8-EE4A-44F4-B4F7-0A574BC0340D}.Default|Default.ActiveCfg = Default
+		{4E8B3D69-1D59-4EAE-BCB7-92BC26C3BA58}.Default|Default.ActiveCfg = Default
+		{57FF8DF9-22E7-4ED8-85D3-E23B480BE7BE}.Default|Default.ActiveCfg = Default
+		{3EAD2BB5-CA7E-4D64-BEC9-A6E7C95B0CD3}.Default|Default.ActiveCfg = Default
+		{819D9E21-3B8F-4503-B098-BE1FD5091B8B}.Default|Default.ActiveCfg = Default
+		{77970B04-2242-40A2-98C1-A70538432873}.Default|Default.ActiveCfg = Default
+		{033BA5C7-B799-40F0-B8BE-741D0E02F34E}.Default|Default.ActiveCfg = Default
+		{B511A519-C45A-4122-995C-D82C3CF5BE9C}.Default|Default.ActiveCfg = Default
+		{CA8E5EEB-A00E-4E2B-9702-0C1A322AABA1}.Default|Default.ActiveCfg = Default
+		{87B45E28-8552-4150-B3FC-7EF7A397DC20}.Default|Default.ActiveCfg = Default
+		{3061CF18-9C99-463A-9171-4CC2AB624B1E}.Default|Default.ActiveCfg = Default
+		{49ADEE38-CEB3-4F9D-A157-F6CFAF37A687}.Default|Default.ActiveCfg = Default
+		{2D2CED0F-54CC-4689-B369-E125AF2DF4ED}.Default|Default.ActiveCfg = Default
+		{DAB50F5A-426A-4F81-9B01-E7A48FABB538}.Default|Default.ActiveCfg = Default
+		{0AD76D32-E3F9-4382-9C1A-152E8439B86B}.Default|Default.ActiveCfg = Default
+		{2A3AE999-5A88-4B57-8812-5F674B2C1E36}.Default|Default.ActiveCfg = Default
+		{20351268-D56B-4BCF-A2D9-B1EF8E9791F7}.Default|Default.ActiveCfg = Default
+		{F5F6C8E4-5A14-47D3-83A0-3E4FE233E85A}.Default|Default.ActiveCfg = Default
+		{3EC2A162-B1E8-492C-97D4-6C97A7D43E9A}.Default|Default.ActiveCfg = Default
+		{EBD80353-46F6-483D-B3A7-B3FC61B016FA}.Default|Default.ActiveCfg = Default
+		{FC215972-4485-4B29-82C1-4DDD218D9303}.Default|Default.ActiveCfg = Default
+		{9B9DD5DB-FCD6-4B9F-9BC0-54DCAF827C99}.Default|Default.ActiveCfg = Default
+		{4C79BFF5-461D-4BF1-A467-30CC92F3170F}.Default|Default.ActiveCfg = Default
+		{F88BA745-0139-4320-94DA-2EE60B0A1D68}.Default|Default.ActiveCfg = Default
+		{F9719B0E-647E-4BF6-B539-C4749EB02DEC}.Default|Default.ActiveCfg = Default
+		{0FCD38BE-0145-489F-9164-3B6B584F25AA}.Default|Default.ActiveCfg = Default
+		{0E5583CE-59E0-46C2-BBA9-1E5EEDC6521C}.Default|Default.ActiveCfg = Default
+		{EC08BB0F-8B97-409A-8504-2B6D2E45744B}.Default|Default.ActiveCfg = Default
+		{73A2B586-BBB3-4B06-8338-3057280C2839}.Default|Default.ActiveCfg = Default
+		{9DBE8D07-B02C-4B14-9274-FF2D318432FA}.Default|Default.ActiveCfg = Default
+		{2AA8E206-6A25-4890-8FDA-08B61B56AD00}.Default|Default.ActiveCfg = Default
+		{5BC08764-DBEC-4148-AD69-4DF9BE6CAFDC}.Default|Default.ActiveCfg = Default
+		{ABC58D6E-0694-4E25-8FA6-1F1647C9E7D8}.Default|Default.ActiveCfg = Default
+		{49DFF171-1634-4AA9-AE4C-0CD8C9EBD1A3}.Default|Default.ActiveCfg = Default
+		{A1C5E029-364F-458E-AA6B-2F652A31F008}.Default|Default.ActiveCfg = Default
+		{25AF6842-FB5B-4988-8A25-FF9C85EDAC5D}.Default|Default.ActiveCfg = Default
+		{428AB281-827E-41A5-B117-8106AACECE00}.Default|Default.ActiveCfg = Default
+		{23CF5D08-2C58-49AD-8650-B2FD8588864F}.Default|Default.ActiveCfg = Default
+		{87873558-1ED6-4DB3-A05F-5E553322E23B}.Default|Default.ActiveCfg = Default
+		{353F549F-B415-423C-B799-7BBB860D2E52}.Default|Default.ActiveCfg = Default
+		{9C2E9B51-E79B-4A75-8A65-3535FB29A9CD}.Default|Default.ActiveCfg = Default
+		{EC149E26-4049-41BA-B92C-571631FDFA0D}.Default|Default.ActiveCfg = Default
+		{2FEA593A-FFAB-4893-8FC0-D995390E9798}.Default|Default.ActiveCfg = Default
+		{4F63B99E-2F65-4EDE-B2B4-295A9AB4FC58}.Default|Default.ActiveCfg = Default
+		{015DFCDE-0DDB-406D-BF3A-A94293B50802}.Default|Default.ActiveCfg = Default
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8153F083-4AC5-41ED-8201-5CF4F4E8F2E1}
+	EndGlobalSection
+EndGlobal

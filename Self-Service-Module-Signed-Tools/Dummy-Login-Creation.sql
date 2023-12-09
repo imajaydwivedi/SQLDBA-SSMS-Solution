@@ -1,0 +1,12 @@
+USE [master]
+GO
+CREATE LOGIN [Ajay] WITH PASSWORD=N'Pa$$w0rd', DEFAULT_DATABASE=[master], CHECK_EXPIRATION=OFF, CHECK_POLICY=OFF
+GO
+USE [tempdb]
+GO
+CREATE USER [Ajay] FOR LOGIN [Ajay]
+GO
+USE [tempdb]
+GO
+ALTER ROLE [db_datareader] ADD MEMBER [Ajay]
+GO

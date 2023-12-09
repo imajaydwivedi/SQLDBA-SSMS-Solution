@@ -1,0 +1,2 @@
+New-NetFirewallRule -DisplayName "Sql Server HADR (TCP/5022)" -Direction Inbound -LocalPort 5022 -Protocol TCP -Action Allow  -Profile Any
+New-NetFirewallRule -DisplayName "Sql Server HADR (TCP/5022)" -Direction Outbound -LocalPort 5022 -Protocol TCP -Action Allow -Profile Any

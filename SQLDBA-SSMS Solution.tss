@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<ArrayOfArrayOfArrayOfString xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <ArrayOfArrayOfString>
+    <ArrayOfString>
+      <string>D:\GitHub\SQLDBA-SSMS-Solution\SQLDBATools-Inventory\SCH-Create-Function-utc2local.sql</string>
+    </ArrayOfString>
+    <ArrayOfString>
+      <string>D:\GitHub\SQLDBA-SSMS-Solution\SQLDBATools-Inventory\SCH-usp_collect_performance_metrics.sql</string>
+    </ArrayOfString>
+    <ArrayOfString>
+      <string>C:\Users\ajayd\Downloads\dbo.dm_os_performance_counters-plan.sqlplan</string>
+    </ArrayOfString>
+    <ArrayOfString>
+      <string>D:\GitHub\SQLDBA-SSMS-Solution\TempScripts\function-interesting-scan-seek-predicates-issue.sql</string>
+    </ArrayOfString>
+    <ArrayOfString>
+      <string>D:\GitHub\SQLDBA-SSMS-Solution\TempScripts\Jobs-Try-Catch.sql</string>
+    </ArrayOfString>
+    <ArrayOfString>
+      <string>D:\GitHub\SQLDBA-SSMS-Solution\SQLDBATools-Inventory\(dba) Collect Metrics.sql</string>
+    </ArrayOfString>
+    <ArrayOfString>
+      <string>D:\GitHub\SQLDBA-SSMS-Solution\StackOverflow\Generate Workloads.sql</string>
+    </ArrayOfString>
+    <ArrayOfString>
+      <string>D:\GitHub\SQLDBA-SSMS-Solution\TempScripts\Grafana-Query-Inline.sql</string>
+    </ArrayOfString>
+  </ArrayOfArrayOfString>
+</ArrayOfArrayOfArrayOfString>

@@ -1,0 +1,142 @@
+<?xml version="1.0"?>
+<SqlWorkbenchSqlProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" Name="LogShipping">
+  <Items>
+    <LogicalFolder Name="Connections" Type="2" Sorted="true">
+      <Items>
+        <ConnectionNode Name="(local):21L-LTPABL-1187\Ajay">
+          <Created>2023-12-07T21:51:01.4007072+05:30</Created>
+          <Type>SQL</Type>
+          <Server>(local)</Server>
+          <UserName />
+          <Authentication>Windows Authentication</Authentication>
+          <InitialDB />
+          <LoginTimeout>30</LoginTimeout>
+          <ExecutionTimeout>0</ExecutionTimeout>
+          <ConnectionProtocol>NotSpecified</ConnectionProtocol>
+          <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
+        </ConnectionNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Queries" Type="0" Sorted="true">
+      <Items>
+        <FileNode Name="[usp_GetLogWalkJobHistoryAlert].sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>[usp_GetLogWalkJobHistoryAlert].sql</FullPath>
+        </FileNode>
+        <FileNode Name="LogShipping.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>LogShipping.sql</FullPath>
+        </FileNode>
+        <FileNode Name="New.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>New.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Old.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Old.sql</FullPath>
+        </FileNode>
+        <FileNode Name="PerformRestore.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>PerformRestore.sql</FullPath>
+        </FileNode>
+        <FileNode Name="ScriptOut-Backup-Restore.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>ScriptOut-Backup-Restore.sql</FullPath>
+        </FileNode>
+        <FileNode Name="ServiceBroker-LogWalk.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>ServiceBroker-LogWalk.sql</FullPath>
+        </FileNode>
+        <FileNode Name="usp_DBAApplyTLogs.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>usp_DBAApplyTLogs.sql</FullPath>
+        </FileNode>
+        <FileNode Name="v0.0 - dbo.fn_IsJobRunning.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>v0.0 - dbo.fn_IsJobRunning.sql</FullPath>
+        </FileNode>
+        <FileNode Name="v1.0 - [usp_GetMail_4_SQLAlerts].sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>v1.0 - [usp_GetMail_4_SQLAlerts].sql</FullPath>
+        </FileNode>
+        <FileNode Name="v1.0 - Send-Mail-Upon-LogWalk-Success.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>v1.0 - Send-Mail-Upon-LogWalk-Success.sql</FullPath>
+        </FileNode>
+        <FileNode Name="v1.1 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>v1.1 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql</FullPath>
+        </FileNode>
+        <FileNode Name="v1.1 - [usp_GetMail_4_SQLAlerts].sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>v1.1 - [usp_GetMail_4_SQLAlerts].sql</FullPath>
+        </FileNode>
+        <FileNode Name="v1.2 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>v1.2 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql</FullPath>
+        </FileNode>
+        <FileNode Name="v1.3 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>v1.3 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql</FullPath>
+        </FileNode>
+        <FileNode Name="v1.4 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>v1.4 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql</FullPath>
+        </FileNode>
+        <FileNode Name="v1.5 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>v1.5 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql</FullPath>
+        </FileNode>
+        <FileNode Name="v1.6 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>v1.6 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql</FullPath>
+        </FileNode>
+        <FileNode Name="v10.0 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>v10.0 - [usp_GetLogWalkJobHistoryAlert_Suppress].sql</FullPath>
+        </FileNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Miscellaneous" Type="3" Sorted="true">
+      <Items />
+    </LogicalFolder>
+  </Items>
+</SqlWorkbenchSqlProject>

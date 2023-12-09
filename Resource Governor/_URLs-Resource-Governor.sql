@@ -1,0 +1,2 @@
+--	https://docs.microsoft.com/en-us/sql/relational-databases/resource-governor/resource-governor?view=sql-server-ver15
+--	https://www.brentozar.com/archive/2020/08/how-to-find-out-whose-queries-are-using-the-most-cpu/

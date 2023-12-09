@@ -1,0 +1,38 @@
+{
+    "CollectIoStats": true,
+    "CollectTimeStats": true,
+    "CommandTimeout": 0,
+    "ConnectionTimeout": 15,
+    "DelayBetweenQueries": 0,
+    "EnableConnectionPooling": true,
+    "ForceDataRetrieval": false,
+    "KillQueriesOnCancel": true,
+    "MainDbConnectionInfo": {
+        "ApplicationIntent": 0,
+        "ConnectTimeout": 15,
+        "Database": "DBA",
+        "EnablePooling": true,
+        "IntegratedAuth": true,
+        "Login": "",
+        "MaxPoolSize": 2,
+        "Password": "",
+        "Server": "SqlPractice"
+    },
+    "MainQuery": "declare @start_id bigint = FLOOR(RAND()*1000000);\r\ndeclare @end_id bigint = @start_id+(2000-1);\r\nexec sp_executesql N'select * from dbo.my_heap_table where id between @start_id and @end_id;',\r\n\t\t\t\tN'@start_id bigint, @end_id bigint', @start_id, @end_id;",
+    "NumIterations": 100000,
+    "NumThreads": 20,
+    "ParamDbConnectionInfo": {
+        "ApplicationIntent": 0,
+        "ConnectTimeout": 0,
+        "Database": "",
+        "EnablePooling": true,
+        "IntegratedAuth": true,
+        "Login": "",
+        "MaxPoolSize": 0,
+        "Password": "",
+        "Server": ""
+    },
+    "ParamMappings": [],
+    "ParamQuery": "",
+    "ShareDbSettings": true
+}
