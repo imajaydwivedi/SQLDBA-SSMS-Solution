@@ -38,8 +38,8 @@
           <FullPath>PS-Search-SystemEventLogs.sql</FullPath>
         </FileNode>
         <FileNode Name="QRY-Search-ErrorLog.sql">
-          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
-          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
           <AssociatedConnUserName />
           <FullPath>QRY-Search-ErrorLog.sql</FullPath>
         </FileNode>

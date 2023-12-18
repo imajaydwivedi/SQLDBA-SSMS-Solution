@@ -3,6 +3,7 @@ USE [DBA];
 declare @collection_time_start smalldatetime = '2023-12-12 08:15';
 declare @collection_time_end smalldatetime = '2023-12-12 09:10';
 declare @table_name nvarchar(225) --= 'Posts';
+declare @query_text nvarchar(500) = 'usp_GetUserPosts';
 declare @no_of_days tinyint --= 1;
 declare @database_name nvarchar(255) = 'StackOverflow';
 declare @program_name nvarchar(255) = 'SQLQueryStress';
@@ -18,6 +19,7 @@ declare @params nvarchar(max);
 set @params = N'@collection_time_start smalldatetime,
 				@collection_time_end smalldatetime,
 				@table_name nvarchar(225),
+				@query_text nvarchar(500),
 				@database_name nvarchar(255), 
 				@program_name nvarchar(255),
 				@login_name nvarchar(255),
@@ -62,6 +64,7 @@ t_queries as (
 	"+(case when @login_name is null then "--" else '' end)+"and w.login_name = @login_name
 	"+(case when @host_name is null then "--" else '' end)+"and w.host_name = @host_name
 	"+(case when @session_id is null then "--" else '' end)+"and w.session_id = @session_id
+	
 	"+(case when @table_name is null then "" else '--' end)+"/*
 	and (	w.sql_text like ('%[[. ]'+@table_name+'[!] ]%') escape '!'
 			or w.sql_command like ('%[[. ]'+@table_name+'[!] ]%') escape '!'
@@ -69,8 +72,14 @@ t_queries as (
 			"+(case when @database_name is not null and @table_name is not null and @index_name is not null then '' else '--' end)+"or convert(varchar(max),w.query_plan) like ('%Database=""!['+@database_name+'!]"" Schema=""![dbo!]"" Table=""!['+@table_name+'!]"" Index=""!['+@index_name+'!]""%""') escape '!'
 		)
 	"+(case when @table_name is null then "" else '--' end)+"*/
-	"+(case when @duration_threshold_minutes is null then "--" else '' end)+"and w.start_time <= dateadd(minute,-@duration_threshold_minutes,w.collection_time)
-	
+
+	"+(case when @query_text is null then "" else '--' end)+"/*
+	and (	w.sql_text like ('%'+@query_text+'%') escape '!'
+			or w.sql_command like ('%'+@query_text+'%') escape '!'
+		)
+	"+(case when @query_text is null then "" else '--' end)+"*/
+
+	"+(case when @duration_threshold_minutes is null then "--" else '' end)+"and w.start_time <= dateadd(minute,-@duration_threshold_minutes,w.collection_time)	
 )
 ,t_capture_interval as (
 	select [capture_interval_sec] = DATEDIFF(SECOND,snap1.collection_time_min, collection_time_snap2) 
@@ -116,7 +125,7 @@ set quoted_identifier on;
 print @sql
 
 exec sp_ExecuteSql @sql, @params, 
-						@collection_time_start, @collection_time_end, @table_name, @database_name, @program_name,
+						@collection_time_start, @collection_time_end, @table_name, @query_text, @database_name, @program_name,
 						@login_name, @host_name, @index_name, @duration_threshold_minutes, @memory_threshold_mb,
 						@session_id;
 /*

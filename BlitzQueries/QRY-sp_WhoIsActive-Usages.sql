@@ -6,7 +6,7 @@ EXEC sp_WhoIsActive @get_outer_command = 1, @get_task_info=2, @get_additional_in
 					--,@get_locks=1
 					,@get_plans=1
 					--,@sort_order = '[CPU] DESC'
-					--,@filter = 94
+					,@filter = 156
 					--,@filter_type = 'login' ,@filter = 'grafana'
 					--,@filter_type = 'program' ,@filter = 'sqlcmd'
 					--,@filter_type = 'database' ,@filter = 'tempdb'
@@ -17,7 +17,7 @@ EXEC sp_WhoIsActive @get_outer_command = 1, @get_task_info=2, @get_additional_in
 					--,@sort_order = '[blocked_session_count] desc, [granted_memory] desc, [start_time]'
 					,@output_column_list = '[dd hh:mm:ss.mss][session_id][sql_text][query_plan][sql_command][login_name][wait_info][status][blocked_session_count][blocking_session_id][tasks][CPU][reads][used_memory][granted_memory][host_name][database_name][program_name][open_tran_count][start_time][%]'
 
--- kill 104
+-- kill 141
 
 /*	Enable LIVE Query Plans
 DBCC TRACESTATUS(7412);

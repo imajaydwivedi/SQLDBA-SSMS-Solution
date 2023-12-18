@@ -97,6 +97,10 @@ Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Security", "Security\Securi
 EndProject
 Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "HADR", "HADR\HADR.ssmssqlproj", "{4F63B99E-2F65-4EDE-B2B4-295A9AB4FC58}"
 EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Work-196", "Work-196\Work-196.ssmssqlproj", "{01B40357-1F3E-4475-87CF-D17B4FF51FE5}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Work-Queries", "Work-Queries\Work-Queries.ssmssqlproj", "{5005EED8-9C3E-4B74-8BDF-BC298681AE36}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Default|Default = Default|Default
@@ -149,7 +153,9 @@ Global
 		{EC149E26-4049-41BA-B92C-571631FDFA0D}.Default|Default.ActiveCfg = Default
 		{2FEA593A-FFAB-4893-8FC0-D995390E9798}.Default|Default.ActiveCfg = Default
 		{4F63B99E-2F65-4EDE-B2B4-295A9AB4FC58}.Default|Default.ActiveCfg = Default
-		{015DFCDE-0DDB-406D-BF3A-A94293B50802}.Default|Default.ActiveCfg = Default
+		{04AE7547-14FD-4D39-B0BB-00A24348F1D4}.Default|Default.ActiveCfg = Default
+		{01B40357-1F3E-4475-87CF-D17B4FF51FE5}.Default|Default.ActiveCfg = Default
+		{5005EED8-9C3E-4B74-8BDF-BC298681AE36}.Default|Default.ActiveCfg = Default
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
