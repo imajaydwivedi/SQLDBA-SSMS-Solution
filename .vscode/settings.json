@@ -1,0 +1,15 @@
+{
+    "dataworkspace.excludedProjects": [
+        "Work-DMAT-160/DMAT_160/DMAT_160.sqlproj",
+        "Org-Project-16.173/AadhaarVault/AadhaarVault.sqlproj",
+        "Org-Project-16.173/AngelBrokingDigiKyc/AngelBrokingDigiKyc.sqlproj",
+        "Org-Project-16.173/AngelBrokingDiyKyc/AngelBrokingDiyKyc.sqlproj",
+        "Org-Project-16.173/AngelBrokingWebDB/AngelBrokingWebDB.sqlproj",
+        "Org-Project-16.173/CorporateKyc/CorporateKyc.sqlproj",
+        "Org-Project-16.173/DigitalCampaign/DigitalCampaign.sqlproj",
+        "Org-Project-16.173/e-Modification/e-Modification.sqlproj",
+        "Org-Project-16.173/EkycApi/EkycApi.sqlproj",
+        "Org-Project-16.173/eMandate/eMandate.sqlproj",
+        "Org-Project-16.173/EsignTrueCopy/EsignTrueCopy.sqlproj"
+    ]
+}

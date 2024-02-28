@@ -488,3 +488,9 @@ $result
 -- 44) Reset Domain (Fix Broken Domain) without Reboot (Only logoff)
 Test-ComputerSecureChannel -Repair -Credential (Get-Credential)
 
+-- 45) Embed Image in Email
+/*	Inline Image in Email	*/
+https://stackoverflow.com/a/27305815/4449743
+https://stackoverflow.com/a/41994121/4449743
+https://www.sqlservercentral.com/forums/topic/how-to-imbed-an-image-into-an-email-sent-by-dbmail#post-1183987
+

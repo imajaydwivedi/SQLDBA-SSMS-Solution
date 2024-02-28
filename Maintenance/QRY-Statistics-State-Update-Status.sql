@@ -1,5 +1,4 @@
-use DBA
-go
+use <<DatabaseWhereUpdateStatsIsNeeded>>
 
 declare @table_name varchar(125) = 'dbo.Posts';
 ;with tStats as (
@@ -33,7 +32,7 @@ declare @table_name varchar(125) = 'dbo.Posts';
 	where s.[object_name] = @table_name
 )
 select	*
-		--distinct columns
+		,[--tsql--] = case when modification_counter > [UpdateThreshold] then 'update statistics '+quotename(db_name())+'.'+@table_name+' '+stats_name+' with sample 5 percent, maxdop=0;' else null end
 from t_stats_final
 --order by 1,2,4,3,[threshold %] desc
 go
