@@ -14,6 +14,7 @@ declare @table_name varchar(125) = 'dbo.Posts';
 							GROUP BY ps.object_id
 	) as ps
 	where o.is_ms_shipped = 0
+	and o.object_id = OBJECT_ID(@table_name)
 )
 ,t_stats_final as (
 	select	[db_name], [object_name], stats_name,
@@ -29,7 +30,7 @@ declare @table_name varchar(125) = 'dbo.Posts';
 			,[threshold %] = case when [UpdateThreshold] = 0 then null else convert(decimal(20,0),(modification_counter*100)/[UpdateThreshold]) end
 			--,[order_id] = (SQRT(s.rows_total)*0.3) +(convert(decimal(20,0),(modification_counter*100)/[UpdateThreshold]))
 	from tStats s
-	where s.[object_name] = @table_name
+	--where s.[object_name] = @table_name
 )
 select	*
 		,[--tsql--] = case when modification_counter > [UpdateThreshold] then 'update statistics '+quotename(db_name())+'.'+@table_name+' '+stats_name+' with sample 5 percent, maxdop=0;' else null end

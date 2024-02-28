@@ -1,4 +1,4 @@
-use DBA_Admin
+use DBA
 go
 
 set transaction isolation level read uncommitted;
@@ -6,9 +6,11 @@ set nocount on;
 --set quoted_identifier off;
 set lock_timeout 60000; -- 60 seconds
 
-declare @execute_indexoptimize bit = 1
-declare @p_db_name sysname 
---set @p_db_name = 'StackOverflow'
+declare @p_execute_indexoptimize bit = 1;
+declare @p_generate_updatestats_stmts bit = 1;
+declare @p_db_name sysname --= 'StackOverflow';
+declare @p_min_record_count bigint = 1000;
+declare @p_add_batch_separator bit = 0;
 
 if object_id('tempdb..#stats') is not null
 	drop table #stats;
@@ -18,13 +20,16 @@ create table #stats
 	modification_count bigint, sqrt_formula bigint, [threshold %] numeric(20,2), order_id numeric(20,2)
 );
 
-declare @query_get_stats nvarchar(max)
-set @query_get_stats = '
-use [?];
-if (len('''+ISNULL(@p_db_name,'')+''') = 0 or (DB_NAME() = '''+ISNULL(@p_db_name,'')+''') ) and (DB_NAME() NOT IN (''DBA''))
-begin
-	--print ''executing for [''+db_name()+'']'';
-	;with tStats as (
+print 'Loop through DBs to fetch Stats info';
+
+declare @c_db_name varchar(255);
+declare @_params nvarchar(max);
+declare @_sql nvarchar(max);
+declare @_sql_temp nvarchar(max);
+
+set @_params = N'@min_record_count bigint';
+set @_sql = N'
+;with tStats as (
 	select	db_name() as DbName, QUOTENAME(schema_name(o.schema_id))+''.''+QUOTENAME(o.name) as ObjectName, sp.stats_id, st.name, sp.last_updated, ps.rows_total, no_recompute,
 			sp.rows_sampled, sp.steps, sp.unfiltered_rows, sp.modification_counter
 			,(SELECT CONVERT(decimal(20,0),MIN (val)) FROM (VALUES (500 + (0.20 * ps.rows_total)),(SQRT(1000 * ps.rows_total))) as Thresholds(val)) as SqrtFormula
@@ -36,26 +41,49 @@ begin
 							FROM sys.dm_db_partition_stats as ps WHERE ps.object_id = st.object_id AND ps.index_id < 2
 							GROUP BY ps.object_id
 	) as ps
-	where ps.rows_total >= 50000
+	where ps.rows_total >= @min_record_count
 	and (NOT ( o.name like ''!_td!_bl%'' escape ''!'' or o.name like ''%audit%''))
-	and (	--sp.modification_counter >= 10000 or
-			(case when sp.modification_counter >= (SELECT CONVERT(decimal(20,0),MIN (val)) FROM (VALUES (500 + (0.20 * ps.rows_total)),(SQRT(1000 * ps.rows_total))) as Thresholds(val)) then 1 else 0 end) = 1
+	and (	(case when sp.modification_counter >= (SELECT CONVERT(decimal(20,0),MIN (val)) FROM (VALUES (500 + (0.20 * ps.rows_total)),(SQRT(1000 * ps.rows_total))) as Thresholds(val)) then 1 else 0 end) = 1
 		)
-	and ( (case when o.is_ms_shipped = 1 and ps.rows_total >= 100000 then 1 when o.is_ms_shipped = 0 then 1 else 0 end) = 1 )
-	)
-	select *, convert(decimal(20,0),(modification_counter*100)/SqrtFormula) as [threshold %]
-			,(SQRT(s.rows_total)*0.3) +(convert(decimal(20,0),(modification_counter*100)/SqrtFormula)) as order_id
-	from tStats s
-	where SqrtFormula > 0
-	order by order_id
+	and ( (case when o.is_ms_shipped = 1 and ps.rows_total >= @min_record_count then 1 when o.is_ms_shipped = 0 then 1 else 0 end) = 1 )
+)
+select *, convert(decimal(20,0),(modification_counter*100)/SqrtFormula) as [threshold %]
+		,(SQRT(s.rows_total)*0.3) +(convert(decimal(20,0),(modification_counter*100)/SqrtFormula)) as order_id
+from tStats s
+where SqrtFormula > 0
+order by order_id;'
+--print @_sql
+
+declare cur_dbs cursor local forward_only for
+	select name --,d.is_read_only, d.is_in_standby, d.state_desc, *
+	from sys.databases d
+	where 1=1
+	and (case when d.is_read_only = 1 then 0
+				when d.is_in_standby = 1 then 0
+				when d.state_desc in ('ONLINE') then 1
+				else 0
+				end) = 1
+	and (name = @p_db_name or @p_db_name is null)
+	and name <> 'tempdb';
+
+open cur_dbs;
+fetch next from cur_dbs into @c_db_name;
+
+while @@FETCH_STATUS = 0
+begin
+	print char(9)+'Looping through '+QUOTENAME(@c_db_name);
+	set @_sql_temp = 'use '+QUOTENAME(@c_db_name)+';'+char(13)+@_sql;
+	
+	insert #stats
+	exec sp_executesql @_sql_temp, @_params, @min_record_count=@p_min_record_count;
+
+	fetch next from cur_dbs into @c_db_name;
 end
-'
-print @query_get_stats
+CLOSE cur_dbs;
+DEALLOCATE cur_dbs;
 
-insert #stats
-exec sp_MSforeachdb @query_get_stats
-
-select	db_name, table_name, COUNT(*) as stats_count_total,
+print 'Display table level aggregated stats info';
+select	id = ROW_NUMBER()over(order by max(order_id) desc), db_name, table_name, COUNT(*) as stats_count_total,
 		max(last_updated) as last_updated, max(rows_total) as rows_total, max(modification_count) as modification_count
 		,QUOTENAME(db_name)+'.'+table_name as [@Indexes]
 		,no_recompute = sum(no_recompute)
@@ -64,25 +92,64 @@ from #stats s
 group by db_name, table_name
 order by max(order_id) desc;
 
-if(@execute_indexoptimize = 1)
+
+declare @c_indexes nvarchar(500);
+declare @c_id int;
+declare @c_table_name varchar(1000);
+declare @c_stats_name varchar(500);
+
+if (@p_generate_updatestats_stmts=1)
 begin
-	declare @db_name sysname, @indexes nvarchar(500);
+	print 'Loop through each stats, and generate 5% sample update stats query';
+	print '--'+replicate ('**',40)
+
 	declare cur_stats cursor local forward_only for
-			select db_name, db_name+'.'+table_name as [@Indexes]
+			select id = ROW_NUMBER()over(order by order_id desc), [db_name], [table_name], stats_name
+			from #stats st
+			where 1=1
+			order by order_id desc;
+
+	open cur_stats;
+	fetch next from cur_stats into @c_id, @c_db_name, @c_table_name, @c_stats_name;
+
+	while @@FETCH_STATUS = 0
+	begin
+		--print char(9)+'Looping through '+QUOTENAME(@c_db_name);
+		set @_sql_temp = 'update /* '+convert(varchar,@c_id)+' */ statistics '+quotename(@c_db_name)+'.'+@c_table_name+' '+
+							quotename(@c_stats_name)+' with sample 5 percent, maxdop=0;'+
+							(case when @p_add_batch_separator=1 then char(13)+'go' else '' end);
+
+		print @_sql_temp;
+
+		fetch next from cur_stats into @c_id, @c_db_name, @c_table_name, @c_stats_name;
+	end
+	CLOSE cur_stats;
+	DEALLOCATE cur_stats;
+
+	print '--'+replicate ('**',40)
+end
+
+
+if(@p_execute_indexoptimize = 1)
+begin
+	print 'Using Ola IndexOptimize, update Modified Statistics';
+
+	declare cur_tables cursor local forward_only for
+			select id = ROW_NUMBER()over(order by max(order_id) desc), db_name, db_name+'.'+table_name as [@Indexes]
 			from #stats
 			where (db_name = @p_db_name or @p_db_name is null)
 			and db_name <> 'tempdb'
 			group by db_name, table_name
 			order by max(order_id) desc;
 
-	open cur_stats;
-	fetch next from cur_stats into @db_name, @indexes;
+	open cur_tables;
+	fetch next from cur_tables into @c_id, @c_db_name, @c_indexes;
 
 	while @@FETCH_STATUS = 0
 	begin
 		begin try
 			EXECUTE dbo.IndexOptimize
-									@Databases = @db_name,
+									@Databases = @c_db_name,
 									--@Databases = 'AVAILABILITY_GROUP_DATABASES',
 									@FragmentationLow = NULL,
 									@FragmentationMedium = NULL,
@@ -96,23 +163,23 @@ begin
 									@MSShippedObjects = 'Y',
 									--@MaxDOP = 4,
 									/* Run parallel update stats for each table */
-									@Indexes = @indexes
+									@Indexes = @c_indexes
 									,@Execute = 'Y';
 		end try
 		begin catch
 			print '*************************************************************************************'
 			print '*************************************************************************************'
-			print '@db_name = '+quotename(@db_name);
-			print '@Indexes = '''+@indexes+'''';
+			print '@c_db_name = '+quotename(@c_db_name);
+			print '@c_indexes = '''+@c_indexes+'''';
 			print ERROR_MESSAGE();
 			print '*************************************************************************************'
 			print '*************************************************************************************'
 		end catch
 
-		fetch next from cur_stats into @db_name, @indexes;
+		fetch next from cur_tables into @c_id, @c_db_name, @c_indexes;
 	end
-	CLOSE cur_stats;
-	DEALLOCATE cur_stats;
+	CLOSE cur_tables;
+	DEALLOCATE cur_tables;
 end
 go
 
