@@ -15,6 +15,18 @@
           <ConnectionProtocol>NotSpecified</ConnectionProtocol>
           <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
         </ConnectionNode>
+        <ConnectionNode Name="196.1.115.196:E84947">
+          <Created>2023-12-26T12:21:14.6424919+05:30</Created>
+          <Type>SQL</Type>
+          <Server>196.1.115.196</Server>
+          <UserName>E84947</UserName>
+          <Authentication>SQL</Authentication>
+          <InitialDB>master</InitialDB>
+          <LoginTimeout>30</LoginTimeout>
+          <ExecutionTimeout>0</ExecutionTimeout>
+          <ConnectionProtocol>NotSpecified</ConnectionProtocol>
+          <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
+        </ConnectionNode>
         <ConnectionNode Name="localhost:21L-LTPABL-1187\Ajay">
           <Created>2022-07-21T16:24:54.6080159+05:30</Created>
           <Type>SQL</Type>
@@ -38,9 +50,9 @@
           <FullPath>PS-Search-SystemEventLogs.sql</FullPath>
         </FileNode>
         <FileNode Name="QRY-Search-ErrorLog.sql">
-          <AssociatedConnectionMoniker />
-          <AssociatedConnSrvName />
-          <AssociatedConnUserName />
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:196.1.115.196:False:E84947</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>196.1.115.196</AssociatedConnSrvName>
+          <AssociatedConnUserName>E84947</AssociatedConnUserName>
           <FullPath>QRY-Search-ErrorLog.sql</FullPath>
         </FileNode>
         <FileNode Name="QRY-SqlCluster-Failover-Time.sql">
@@ -54,6 +66,12 @@
           <AssociatedConnSrvName />
           <AssociatedConnUserName />
           <FullPath>SQLQuery1.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SQLQuery2.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>SQLQuery2.sql</FullPath>
         </FileNode>
       </Items>
     </LogicalFolder>

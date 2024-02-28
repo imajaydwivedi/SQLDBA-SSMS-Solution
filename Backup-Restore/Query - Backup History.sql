@@ -7,7 +7,7 @@ SELECT top 1 WITH TIES bs.database_name,
 			AND bs.is_copy_only = 0 THEN 'Full Database'
 			WHEN bs.type = 'D'
 			AND bs.is_copy_only = 1 THEN 'Full Copy-Only Database'
-			WHEN bs.type = 'I' THEN 'Differential database backup'
+			WHEN bs.type = 'I' THEN 'Differential database'
 			WHEN bs.type = 'L' THEN 'Transaction Log'
 			WHEN bs.type = 'F' THEN 'File or filegroup'
 			WHEN bs.type = 'G' THEN 'Differential file'
