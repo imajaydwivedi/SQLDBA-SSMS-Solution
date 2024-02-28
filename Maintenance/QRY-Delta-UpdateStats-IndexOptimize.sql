@@ -1,4 +1,4 @@
-use DBA
+use DBA_Admin
 go
 
 set transaction isolation level read uncommitted;
@@ -14,7 +14,7 @@ if object_id('tempdb..#stats') is not null
 	drop table #stats;
 create table #stats
 (	id bigint identity(1,1) not null, [db_name] sysname, table_name nvarchar(500), stats_id bigint, stats_name sysname,
-	last_updated datetime2, rows_total bigint, rows_sampled bigint, steps int, unfiltered_rows bigint,
+	last_updated datetime2, rows_total bigint, no_recompute smallint, rows_sampled bigint, steps int, unfiltered_rows bigint,
 	modification_count bigint, sqrt_formula bigint, [threshold %] numeric(20,2), order_id numeric(20,2)
 );
 
@@ -25,7 +25,7 @@ if (len('''+ISNULL(@p_db_name,'')+''') = 0 or (DB_NAME() = '''+ISNULL(@p_db_name
 begin
 	--print ''executing for [''+db_name()+'']'';
 	;with tStats as (
-	select	db_name() as DbName, QUOTENAME(schema_name(o.schema_id))+''.''+QUOTENAME(o.name) as ObjectName, sp.stats_id, st.name, sp.last_updated, ps.rows_total,
+	select	db_name() as DbName, QUOTENAME(schema_name(o.schema_id))+''.''+QUOTENAME(o.name) as ObjectName, sp.stats_id, st.name, sp.last_updated, ps.rows_total, no_recompute,
 			sp.rows_sampled, sp.steps, sp.unfiltered_rows, sp.modification_counter
 			,(SELECT CONVERT(decimal(20,0),MIN (val)) FROM (VALUES (500 + (0.20 * ps.rows_total)),(SQRT(1000 * ps.rows_total))) as Thresholds(val)) as SqrtFormula
 			--,(case when sp.modification_counter >= (SELECT CONVERT(decimal(20,0),MIN (val)) FROM (VALUES (500 + (0.20 * ps.rows_total)),(SQRT(1000 * ps.rows_total))) as Thresholds(val)) then 1 else 0 end) as _Ola_IndexOptimize
@@ -58,6 +58,7 @@ exec sp_MSforeachdb @query_get_stats
 select	db_name, table_name, COUNT(*) as stats_count_total,
 		max(last_updated) as last_updated, max(rows_total) as rows_total, max(modification_count) as modification_count
 		,QUOTENAME(db_name)+'.'+table_name as [@Indexes]
+		,no_recompute = sum(no_recompute)
 		,[********************* tsql-RECOMPILE ***********************] = 'exec '+QUOTENAME(s.db_name)+'..sp_recompile '''+table_name+''''
 from #stats s
 group by db_name, table_name
