@@ -8,6 +8,7 @@ set lock_timeout 60000; -- 60 seconds
 
 declare @p_execute_indexoptimize bit = 1;
 declare @p_generate_updatestats_stmts bit = 1;
+declare @p_execute_generated_updatestats_stmts bit = 1;
 declare @p_db_name sysname --= 'StackOverflow';
 declare @p_min_record_count bigint = 1000;
 declare @p_add_batch_separator bit = 0;
@@ -71,11 +72,21 @@ fetch next from cur_dbs into @c_db_name;
 
 while @@FETCH_STATUS = 0
 begin
-	print char(9)+'Looping through '+QUOTENAME(@c_db_name);
 	set @_sql_temp = 'use '+QUOTENAME(@c_db_name)+';'+char(13)+@_sql;
 	
-	insert #stats
-	exec sp_executesql @_sql_temp, @_params, @min_record_count=@p_min_record_count;
+	begin try
+		insert #stats
+		exec sp_executesql @_sql_temp, @_params, @min_record_count=@p_min_record_count;
+	end try
+	begin catch
+		print char(9)+'Failure during stats collection for database '+QUOTENAME(@c_db_name);
+		print '*************************************************************************************'
+		print '*************************************************************************************'
+		print '@c_db_name = '+quotename(@c_db_name);
+		print ERROR_MESSAGE();
+		print '*************************************************************************************'
+		print '*************************************************************************************'
+	end catch
 
 	fetch next from cur_dbs into @c_db_name;
 end
@@ -120,7 +131,22 @@ begin
 							(case when @p_add_batch_separator=1 then char(13)+'go' else '' end);
 
 		print @_sql_temp;
-
+		if(@p_execute_generated_updatestats_stmts=1)
+		begin
+			begin try
+				exec (@_sql_temp);
+			end try
+			begin catch
+				print '*************************************************************************************'
+				print '*************************************************************************************'
+				print '@c_db_name = '+quotename(@c_db_name);
+				print '@c_table_name = '''+@c_table_name+'''';
+				print '@c_stats_name = '''+@c_stats_name+'''';
+				print ERROR_MESSAGE();
+				print '*************************************************************************************'
+				print '*************************************************************************************'
+			end catch
+		end
 		fetch next from cur_stats into @c_id, @c_db_name, @c_table_name, @c_stats_name;
 	end
 	CLOSE cur_stats;
@@ -129,6 +155,11 @@ begin
 	print '--'+replicate ('**',40)
 end
 
+if @p_execute_generated_updatestats_stmts = 1
+begin
+	print 'Since @p_execute_generated_updatestats_stmts is enabled, then set @p_execute_indexoptimize to off.';
+	set @p_execute_indexoptimize = 0;
+end
 
 if(@p_execute_indexoptimize = 1)
 begin
@@ -147,6 +178,7 @@ begin
 
 	while @@FETCH_STATUS = 0
 	begin
+		print char(13)+'************************* Working on "'+convert(varchar,@c_id)+'"..'+char(13);
 		begin try
 			EXECUTE dbo.IndexOptimize
 									@Databases = @c_db_name,
