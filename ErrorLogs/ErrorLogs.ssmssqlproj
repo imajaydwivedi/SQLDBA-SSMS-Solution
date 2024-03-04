@@ -50,9 +50,9 @@
           <FullPath>PS-Search-SystemEventLogs.sql</FullPath>
         </FileNode>
         <FileNode Name="QRY-Search-ErrorLog.sql">
-          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:196.1.115.196:False:E84947</AssociatedConnectionMoniker>
-          <AssociatedConnSrvName>196.1.115.196</AssociatedConnSrvName>
-          <AssociatedConnUserName>E84947</AssociatedConnUserName>
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
           <FullPath>QRY-Search-ErrorLog.sql</FullPath>
         </FileNode>
         <FileNode Name="QRY-SqlCluster-Failover-Time.sql">
