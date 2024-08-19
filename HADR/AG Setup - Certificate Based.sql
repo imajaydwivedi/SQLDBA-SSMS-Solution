@@ -3,11 +3,14 @@ USE master;
 CREATE MASTER KEY ENCRYPTION BY PASSWORD = 'S0meStrongP@ssword';  
 GO
 
-USE master;  
+USE master; 
+--drop certificate AgHost_1A_cert;
 CREATE CERTIFICATE AgHost_1A_cert   
-   WITH SUBJECT = 'AgHost-1A certificate';  
+   WITH SUBJECT = 'AgHost-1A certificate',
+   expiry_date='2032-12-31';  
 GO
 
+--drop endpoint Endpoint_Mirroring;
 CREATE ENDPOINT Endpoint_Mirroring  
    STATE = STARTED  
    AS TCP (  
@@ -36,10 +39,13 @@ CREATE MASTER KEY ENCRYPTION BY PASSWORD = 'S0meStrongP@ssword';
 GO
 
 USE master;  
+--drop certificate AgHost_1B_cert;
 CREATE CERTIFICATE AgHost_1B_cert   
-   WITH SUBJECT = 'AgHost-1B certificate';  
+   WITH SUBJECT = 'AgHost-1B certificate',
+   expiry_date='2032-12-31';    
 GO
 
+--drop endpoint Endpoint_Mirroring;
 CREATE ENDPOINT Endpoint_Mirroring  
    STATE = STARTED  
    AS TCP (  
@@ -64,19 +70,20 @@ GO
 
 
 :CONNECT AgHost-1A
-
+--drop certificate AgHost_1B_cert;
 CREATE CERTIFICATE AgHost_1B_cert  
    AUTHORIZATION remote_host_login  
    FROM FILE = '\\sqlmonitor\Backup\AgHost-1B\AgHost_1B_cert.cer'  
 GO
 
 GRANT CONNECT ON ENDPOINT::Endpoint_Mirroring TO remote_host_login;
+go
 GRANT CONNECT ON ENDPOINT::[Endpoint_Mirroring] TO [LAB\SQLService]
 GO
 
 
 :CONNECT AgHost-1B
-
+--drop certificate AgHost_1A_cert;
 CREATE CERTIFICATE AgHost_1A_cert  
    AUTHORIZATION remote_host_login  
    FROM FILE = '\\sqlmonitor\Backup\AgHost-1A\AgHost_1A_cert.cer'  
