@@ -3,9 +3,9 @@ GO
 
 CREATE SERVER AUDIT LoginAudit
 TO FILE 
-(	FILEPATH = N'E:\LoginAudit'
+(	FILEPATH = N'E:\SQLServer-Audit'
 	,MAXSIZE = 50 MB
-	,MAX_ROLLOVER_FILES = 10
+	,MAX_ROLLOVER_FILES = 100
 	,RESERVE_DISK_SPACE = OFF
 ) 
 WITH
@@ -30,9 +30,14 @@ GO
 
 
 -- Read audit file
-select top 1000 * from fn_get_audit_file(
-	'E:\LoginAudit\LoginAudit_*.sqlaudit'
+select	top 1000 
+		a.event_time, server_instance_name, a.client_ip, a.application_name, a.host_name,
+		a.database_name, a.schema_name, a.object_name, a.action_id, 
+		a.session_id, a.class_type, a.session_server_principal_name, a.statement, 
+		a.additional_information
+from fn_get_audit_file(
+	'E:\SQLServer-Audit\LoginAudit_*.sqlaudit'
 	,default
 	,default
-)
+) a
 order by event_time desc
