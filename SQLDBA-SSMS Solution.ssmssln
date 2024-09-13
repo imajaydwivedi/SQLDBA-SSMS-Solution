@@ -103,12 +103,13 @@ Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Work-Queries", "Work-Querie
 EndProject
 Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Work-ANAND1-Performance-Optimization", "Work-ANAND1-Performance-Optimization\Work-ANAND1-Performance-Optimization.ssmssqlproj", "{BC90E720-6FE2-4B06-B61E-AD74931C38D8}"
 EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Replication-Transactional-SQLAuthentication-Snapshot-Based", "Replication-Transactional-SQLAuthentication-Snapshot-Based\Replication-Transactional-SQLAuthentication-Snapshot-Based.ssmssqlproj", "{A35A7096-8C4E-48A6-92B1-A1BFD6D3D706}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Default|Default = Default|Default
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{5CC73A06-43CC-48D7-B773-D67312CDAF0D}.Default|Default.ActiveCfg = Default
 		{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}.Default|Default.ActiveCfg = Default
 		{15CC463C-A8D2-4F91-BF9C-5D8D86E815E2}.Default|Default.ActiveCfg = Default
 		{97D05A33-770A-4C00-B526-9FA045863965}.Default|Default.ActiveCfg = Default
@@ -159,6 +160,8 @@ Global
 		{01B40357-1F3E-4475-87CF-D17B4FF51FE5}.Default|Default.ActiveCfg = Default
 		{5005EED8-9C3E-4B74-8BDF-BC298681AE36}.Default|Default.ActiveCfg = Default
 		{BC90E720-6FE2-4B06-B61E-AD74931C38D8}.Default|Default.ActiveCfg = Default
+		{7A1B8DAE-6A23-46C0-A03E-19F36CC34A1A}.Default|Default.ActiveCfg = Default
+		{A35A7096-8C4E-48A6-92B1-A1BFD6D3D706}.Default|Default.ActiveCfg = Default
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

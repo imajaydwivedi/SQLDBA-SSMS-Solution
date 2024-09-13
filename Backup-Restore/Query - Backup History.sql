@@ -41,7 +41,7 @@ INNER JOIN msdb.dbo.backupmediaset bms ON bs.[media_set_id] = bms.[media_set_id]
 --WHERE bs.backup_start_date > DATEADD(MONTH, -2, sysdatetime()) --only look at last two months
 WHERE 1 = 1
 and database_name in ('MISC')
-and bs.type in ('L')
+--and bs.type in ('L')
 --and bf.device_type in (2)
 --ORDER BY bs.Backup_Start_Date DESC, bs.database_name ASC
 ORDER BY ROW_NUMBER()OVER(PARTITION BY bs.database_name ORDER BY bs.Backup_Start_Date DESC)
