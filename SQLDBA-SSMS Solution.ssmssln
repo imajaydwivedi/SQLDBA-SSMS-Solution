@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# SQL Server Management Studio Solution File, Format Version 18.00
+# SQL Server Management Studio Solution File, Format Version 20.00
 VisualStudioVersion = 15.0.27428.2015
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "BlitzQueries", "BlitzQueries\BlitzQueries.ssmssqlproj", "{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}"
@@ -97,13 +97,11 @@ Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Security", "Security\Securi
 EndProject
 Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "HADR", "HADR\HADR.ssmssqlproj", "{4F63B99E-2F65-4EDE-B2B4-295A9AB4FC58}"
 EndProject
-Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Work-196", "Work-196\Work-196.ssmssqlproj", "{01B40357-1F3E-4475-87CF-D17B4FF51FE5}"
-EndProject
 Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Work-Queries", "Work-Queries\Work-Queries.ssmssqlproj", "{5005EED8-9C3E-4B74-8BDF-BC298681AE36}"
 EndProject
-Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Work-ANAND1-Performance-Optimization", "Work-ANAND1-Performance-Optimization\Work-ANAND1-Performance-Optimization.ssmssqlproj", "{BC90E720-6FE2-4B06-B61E-AD74931C38D8}"
-EndProject
 Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Replication-Transactional-SQLAuthentication-Snapshot-Based", "Replication-Transactional-SQLAuthentication-Snapshot-Based\Replication-Transactional-SQLAuthentication-Snapshot-Based.ssmssqlproj", "{A35A7096-8C4E-48A6-92B1-A1BFD6D3D706}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "Advanced Query Techniques", "Advanced Query Techniques\Advanced Query Techniques.ssmssqlproj", "{17C9B87C-3499-4A57-A272-058810F44979}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -157,11 +155,10 @@ Global
 		{EC149E26-4049-41BA-B92C-571631FDFA0D}.Default|Default.ActiveCfg = Default
 		{2FEA593A-FFAB-4893-8FC0-D995390E9798}.Default|Default.ActiveCfg = Default
 		{4F63B99E-2F65-4EDE-B2B4-295A9AB4FC58}.Default|Default.ActiveCfg = Default
-		{01B40357-1F3E-4475-87CF-D17B4FF51FE5}.Default|Default.ActiveCfg = Default
 		{5005EED8-9C3E-4B74-8BDF-BC298681AE36}.Default|Default.ActiveCfg = Default
-		{BC90E720-6FE2-4B06-B61E-AD74931C38D8}.Default|Default.ActiveCfg = Default
-		{7A1B8DAE-6A23-46C0-A03E-19F36CC34A1A}.Default|Default.ActiveCfg = Default
 		{A35A7096-8C4E-48A6-92B1-A1BFD6D3D706}.Default|Default.ActiveCfg = Default
+		{17C9B87C-3499-4A57-A272-058810F44979}.Default|Default.ActiveCfg = Default
+		{9CD24DAD-B9ED-442F-A8D1-99619DA10B97}.Default|Default.ActiveCfg = Default
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
