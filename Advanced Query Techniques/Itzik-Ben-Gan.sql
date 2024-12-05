@@ -308,3 +308,10 @@ https://sqlperformance.com/2019/04/t-sql-queries/row-pattern-recognition-in-sql
 
 
 
+/* ************************************************************************************
+** Beware of nondeterministic T-SQL code	
+
+** Deterministic calculation
+A calculation that is guaranteed to return the same result when called repeatedly with same inputs
+** ***********************************************************************************/
+
