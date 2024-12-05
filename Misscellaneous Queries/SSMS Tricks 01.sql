@@ -14,3 +14,5 @@ Application Name=Grafana;Workstation ID=Grafana-Server;
 Application Name=SQLQueryStress;Workstation ID=SQLQueryStress-Server;
 
 Application Name=Ajay-SSMS;Workstation ID=Ajay-PC;Data Source=MyDbServerName
+
+ApplicationIntent=ReadOnly;Initial Catalog = DBATools;
