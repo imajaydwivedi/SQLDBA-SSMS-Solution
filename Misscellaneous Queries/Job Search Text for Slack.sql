@@ -7,8 +7,8 @@ Resume -> https://ajaydwivedi.com/go/resume
 My projects/Blogs have been appreciated by likes of BrentOzar & others - https://github.com/imajaydwivedi/Images/blob/master/Recognitions/SQLMonitor-Recognitions-gif.gif
 Received various reward in various jobs for automating repetitive tasks bring efficiency in processes. https://github.com/imajaydwivedi/Images/tree/master/Recognitions
 
-With 13+ years of extensive experience in programming & performance tuning in SQL Server, I am fit for any roles like developer, dba or architect.
-My skills include SQLServer, Linux, Python, PowerShell etc.
+With 13+ years of extensive experience in programming & performance tuning in SQL Server & Postgres, I am fit for any roles like developer, dba or architect.
+My skills include SQLServer, PowerShell, Python, Postgres, Linux etc.
 
 Below are some of my open source projects that show my expertise -
 
