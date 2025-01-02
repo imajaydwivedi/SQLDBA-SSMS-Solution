@@ -8,12 +8,15 @@ Param (
     [String]$PublisherServer,
     [Parameter(Mandatory=$true)]
     [String]$SubscriberServer,
-    [Parameter(Mandatory=$true)]
-    [String]$PublicationName,
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
+    [ValidateSet('NTT', 'GPX')]
+    [string]$DataCenter,
+    [Parameter(Mandatory=$true)]   
     [String]$PublisherDatabase,
     [Parameter(Mandatory=$false)]
     [String]$SubsciberDatabase,
+    [Parameter(Mandatory=$true)]
+    [PSCredential]$SqlCredential,
     [Parameter(Mandatory=$true)]
     [String[]]$Table,
     [Parameter(Mandatory=$true)]
@@ -34,7 +37,6 @@ Param (
     [String[]]$LoginsForReplAccess = @('sa')
 )
 
-
 # Declare other important variables/Parameters
 [String]$dropReplPubFileName = "8__drop-replication-publication.sql"
 [String]$addReplDistributorFileName = "9a__replication-add-distributor.sql"
@@ -43,6 +45,8 @@ Param (
 [String]$startSnapshotAgentFileName = "9d__replication-start-snapshot-agent.sql"
 [String]$CheckReplSnapshotHistoryFileName = "9e__replication-check-snapshot-history.sql"
 [String]$createReplSubFileName = "9f__replication-create-subscription.sql"
+[String]$getPublicationDetailsFileName = "9g__replication-get-publication-details.sql"
+[String]$CheckReplDistributionHistoryFileName = "9h__replication-check-distribution-history.sql"
 
 $verbose = $false;
 if ($PSBoundParameters.ContainsKey('Verbose')) { # Command line specifies -Verbose[:$false]
@@ -53,6 +57,9 @@ $debug = $false;
 if ($PSBoundParameters.ContainsKey('Debug')) { # Command line specifies -Debug[:$false]
     $debug = $PSBoundParameters.Get_Item('Debug')
 }
+
+# Fetch allowed values dynamically
+$allowedDataCenterValues = ($MyInvocation.MyCommand.Parameters['DataCenter'].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] }).ValidValues
 
 # Evaluate path of ScriptsDirectory folder
 if( (-not [String]::IsNullOrEmpty($PSScriptRoot)) -or ((-not [String]::IsNullOrEmpty($ScriptsDirectory)) -and $(Test-Path $ScriptsDirectory)) ) {
@@ -66,8 +73,6 @@ else {
     Write-Error "Stop here. Fix above issue."
 }
 
-$OutputFile = "$ScriptsDirectory\temp-output-Create-Replication-Publication.sql"
-
 # Construct full file path
 $dropReplPubFilePath = "$ScriptsDirectory\$dropReplPubFileName"
 $addReplDistributorFilePath = "$ScriptsDirectory\$addReplDistributorFileName"
@@ -76,6 +81,8 @@ $addReplArticlesFilePath = "$ScriptsDirectory\$addReplArticlesFileName"
 $startSnapshotAgentFilePath = "$ScriptsDirectory\$startSnapshotAgentFileName"
 $CheckReplSnapshotHistoryFilePath = "$ScriptsDirectory\$CheckReplSnapshotHistoryFileName"
 $createReplSubFilePath = "$ScriptsDirectory\$createReplSubFileName"
+$getPublicationDetailsFilePath = "$ScriptsDirectory\$getPublicationDetailsFileName"
+$CheckReplDistributionHistoryFilePath = "$ScriptsDirectory\$CheckReplDistributionHistoryFileName"
 
 # Trim PublisherServer
 $PublisherServer = $PublisherServer.Trim()
@@ -98,9 +105,54 @@ if($SubscriberServer -match "(?'SqlInstance'.+),(?'PortNo'\d+)") {
 }
 $tablesCount = $Table.Count
 
+# Extract one article name & owner
+$firstTable = $Table[0]
+$schemaName = 'dbo'
+$tableName = $firstTable.Trim()
+if($firstTable -match "(?'Schema'.+)\.(?'Table'.+)") {
+    $schemaName = $Matches['Schema']
+    $tableName = $Matches['Table']
+}
+
+
+# Get connection to Distributor
+$conDistributorServer = Connect-DbaInstance -SqlInstance $DistributorServer -Database $DistributionDatabase -SqlCredential $SqlCredential -ClientName "Get-PublicationDetails" -TrustServerCertificate -EncryptConnection -ErrorAction Stop -Debug:$false
+
+
+
+if ($true)
+{ 
+    $sqlPublicationDetails = [System.IO.File]::ReadAllText($getPublicationDetailsFilePath)    
+    $sqlPublicationDetails = $sqlPublicationDetails.Replace('@publisher_server', "'$SubscriberServerWithOutPort'")
+    $sqlPublicationDetails = $sqlPublicationDetails.Replace('@publisher_db', "'$SubsciberDatabase'")
+    $sqlPublicationDetails = $sqlPublicationDetails.Replace('@subscriber_server', "'$PublisherServerWithOutPort'")
+    $sqlPublicationDetails = $sqlPublicationDetails.Replace('@subscriber_db', "'$PublisherDatabase'")
+    $sqlPublicationDetails = $sqlPublicationDetails.Replace('@source_owner', "'$schemaName'")
+    $sqlPublicationDetails = $sqlPublicationDetails.Replace('@source_object', "'$tableName'")
+
+    $publicationDetails = @()
+    $publicationDetails += $conDistributorServer | Invoke-DbaQuery -Query $sqlPublicationDetails -EnableException
+}
+
+Write-Debug "Compute Publication"
+
+# Compute publication name
+if ($publicationDetails.Count -gt 0) {
+    [String]$dataCenterCurrent = $($allowedDataCenterValues | Where-Object {$_ -ne $DataCenter})
+
+    [String]$publicationNameCurrent = $publicationDetails[0].publication    
+    [String]$PublicationNameNew = $publicationNameCurrent -replace $dataCenterCurrent, $DataCenter
+}
+
+if([String]::IsNullOrEmpty($OutputFile)) {
+    #$OutputFile = "$ScriptsDirectory\Scriptout--Drop-Pub-[$publicationNameCurrent]--Create-Pub-[$PublicationNameNew].sql"
+    $OutputFile = "$ScriptsDirectory\temp-output-Create-Replication-Publication.sql"
+}
+
 # Print variable values
-"$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "`$PublicationName = '$PublicationName'"
-"$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "`$LogReaderAgentJob = '$LogReaderAgentJob'"
+"$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "`$publicationNameCurrent = '$publicationNameCurrent'"
+"$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "`$PublicationNameNew = '$PublicationNameNew'"
+#"$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "`$LogReaderAgentJob = '$LogReaderAgentJob'"
 "$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "No of Tables = '$tablesCount'"
 
 # Initialize output file
@@ -113,12 +165,12 @@ if ($IncludeDropPublicationScripts)
         "$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "Add steps to drop existing publication.."
     }
     $dropReplPubFileContent = [System.IO.File]::ReadAllText($dropReplPubFilePath)    
-    $dropReplPubFileContent = $dropReplPubFileContent.Replace("[PublisherServer]", "PublisherServer [$PublisherServer]")
+    $dropReplPubFileContent = $dropReplPubFileContent.Replace("[PublisherServer]", "PublisherServer [$SubscriberServer]")
     $dropReplPubFileContent = $dropReplPubFileContent.Replace("[DistributorServer]", "DistributorServer [$DistributorServer]")
-    $dropReplPubFileContent = $dropReplPubFileContent.Replace("<PublisherDbNameHere>", "$PublisherDatabase")
-    $dropReplPubFileContent = $dropReplPubFileContent.Replace("<PublicationNameHere>", "$PublicationName")
-    $dropReplPubFileContent = $dropReplPubFileContent.Replace("<SubscriberServerNameHere>", "$SubscriberServer")
-    $dropReplPubFileContent = $dropReplPubFileContent.Replace("<SubscriberDbNameHere>", "$SubsciberDatabase")
+    $dropReplPubFileContent = $dropReplPubFileContent.Replace("<PublisherDbNameHere>", "$SubsciberDatabase")
+    $dropReplPubFileContent = $dropReplPubFileContent.Replace("<PublicationNameHere>", "$publicationNameCurrent")
+    $dropReplPubFileContent = $dropReplPubFileContent.Replace("<SubscriberServerNameHere>", "$PublisherServerWithOutPort")
+    $dropReplPubFileContent = $dropReplPubFileContent.Replace("<SubscriberDbNameHere>", "$PublisherDatabase")
 
     $sqlDropArticleAll = ''
     foreach($tbl in $Table)
@@ -134,8 +186,8 @@ if ($IncludeDropPublicationScripts)
         $schemaName = $schemaName.Trim().Trim('[').Trim(']').Trim()
         $tableName = $tableName.Trim().Trim('[').Trim(']').Trim()
 
-        $sqlDropArticle = "use [$PublisherDatabase]"
-        $sqlDropArticle += "`nexec sp_droparticle @article = N'$tableName', @publication = N'$PublicationName', @force_invalidate_snapshot = 1"
+        $sqlDropArticle = "use [$SubsciberDatabase]"
+        $sqlDropArticle += "`nexec sp_droparticle @article = N'$tableName', @publication = N'$publicationNameCurrent', @force_invalidate_snapshot = 1"
         $sqlDropArticle += "`nGO`n"
 
         $sqlDropArticleAll += $sqlDropArticle
@@ -172,8 +224,8 @@ $createReplPubFileContent = $createReplPubFileContent.Replace("<PublisherDbNameH
 $createReplPubFileContent = $createReplPubFileContent.Replace("<ReplLoginNameHere>", "$ReplLoginName")
 $createReplPubFileContent = $createReplPubFileContent.Replace("<ReplLoginPasswordHere>", "$ReplLoginPassword")
 $createReplPubFileContent = $createReplPubFileContent.Replace("<PublisherServerNameHere>", "$PublisherServer")
-$createReplPubFileContent = $createReplPubFileContent.Replace("<PublicationNameHere>", "$PublicationName")
-$createReplPubFileContent = $createReplPubFileContent.Replace("<LogReaderAgentJobNameHere>", "$LogReaderAgentJob")
+$createReplPubFileContent = $createReplPubFileContent.Replace("<PublicationNameHere>", "$PublicationNameNew")
+#$createReplPubFileContent = $createReplPubFileContent.Replace("<LogReaderAgentJobNameHere>", "$LogReaderAgentJob")
 $createReplPubFileContent = $createReplPubFileContent.Replace("[PublisherServer]", "PublisherServer [$PublisherServer]")
 $createReplPubFileContent = $createReplPubFileContent.Replace("[DistributorServer]", "DistributorServer [$DistributorServer]")
 
@@ -181,7 +233,7 @@ $sqlGrantPubAccessAll = ''
 foreach($login in $LoginsForReplAccess)
 {
     $login = $login.Trim().Trim('[').Trim(']').Trim()
-    $sqlGrantPubAccess = "exec sp_grant_publication_access @publication = N'$PublicationName', @login = N'$login';`n"
+    $sqlGrantPubAccess = "exec sp_grant_publication_access @publication = N'$PublicationNameNew', @login = N'$login';`n"
     $sqlGrantPubAccessAll += $sqlGrantPubAccess
 }
 $createReplPubFileContent = $createReplPubFileContent.Replace("-- execute sp_grant_publication_access for LoginForReplAccessHere", "$sqlGrantPubAccessAll")
@@ -193,7 +245,7 @@ if($verbose) {
     "$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "Add sql to add articles.."
 }
 $addReplArticlesFileContentOriginal = [System.IO.File]::ReadAllText($addReplArticlesFilePath)
-$addReplArticlesFileContentOriginal = $addReplArticlesFileContentOriginal.Replace("<PublicationNameHere>", "$PublicationName")
+$addReplArticlesFileContentOriginal = $addReplArticlesFileContentOriginal.Replace("<PublicationNameHere>", "$PublicationNameNew")
 $addReplArticlesFileContentOriginal = $addReplArticlesFileContentOriginal.Replace("<PublisherDbNameHere>", "$PublisherDatabase")
 $addReplArticlesFileContentOriginal = $addReplArticlesFileContentOriginal.Replace("[PublisherServer]", "PublisherServer [$PublisherServer]")
 $addReplArticlesFileContentOriginal = $addReplArticlesFileContentOriginal.Replace("[DistributorServer]", "DistributorServer [$DistributorServer]")
@@ -224,7 +276,7 @@ if($verbose) {
     "$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "Add sql to start Snapshot agent.."
 }
 $startSnapshotAgentFileContent = [System.IO.File]::ReadAllText($startSnapshotAgentFilePath)
-$startSnapshotAgentFileContent = $startSnapshotAgentFileContent.Replace("<PublicationNameHere>", "$PublicationName")
+$startSnapshotAgentFileContent = $startSnapshotAgentFileContent.Replace("<PublicationNameHere>", "$PublicationNameNew")
 $startSnapshotAgentFileContent = $startSnapshotAgentFileContent.Replace("<PublisherDbNameHere>", "$PublisherDatabase")
 $startSnapshotAgentFileContent = $startSnapshotAgentFileContent.Replace("[PublisherServer]", "PublisherServer [$PublisherServer]")
 $startSnapshotAgentFileContent = $startSnapshotAgentFileContent.Replace("[DistributorServer]", "DistributorServer [$DistributorServer]")
@@ -237,7 +289,7 @@ if($verbose) {
     "$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "Add sql to check Snapshot agent history.."
 }
 $checkReplSnapshotHistoryFileContent = [System.IO.File]::ReadAllText($CheckReplSnapshotHistoryFilePath)
-$checkReplSnapshotHistoryFileContent = $checkReplSnapshotHistoryFileContent.Replace("<PublicationNameHere>", "$PublicationName")
+$checkReplSnapshotHistoryFileContent = $checkReplSnapshotHistoryFileContent.Replace("<PublicationNameHere>", "$PublicationNameNew")
 $checkReplSnapshotHistoryFileContent = $checkReplSnapshotHistoryFileContent.Replace("<PublisherDbNameHere>", "$PublisherDatabase")
 $checkReplSnapshotHistoryFileContent = $checkReplSnapshotHistoryFileContent.Replace("<DistributionDbNameHere>", "$DistributionDatabase")
 $checkReplSnapshotHistoryFileContent = $checkReplSnapshotHistoryFileContent.Replace("[PublisherServer]", "PublisherServer [$PublisherServer]")
@@ -252,7 +304,7 @@ if($verbose) {
     "$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "Add sql to add subscription.."
 }
 $createReplSubFileContent = [System.IO.File]::ReadAllText($createReplSubFilePath)
-$createReplSubFileContent = $createReplSubFileContent.Replace("<PublicationNameHere>", "$PublicationName")
+$createReplSubFileContent = $createReplSubFileContent.Replace("<PublicationNameHere>", "$PublicationNameNew")
 $createReplSubFileContent = $createReplSubFileContent.Replace("<PublisherServerNameHere>", "$PublisherServer")
 $createReplSubFileContent = $createReplSubFileContent.Replace("<PublisherDbNameHere>", "$PublisherDatabase")
 $createReplSubFileContent = $createReplSubFileContent.Replace("<SubscriberServerNameHere>", "$SubscriberServer")
@@ -267,6 +319,20 @@ $createReplSubFileContent = $createReplSubFileContent.Replace("<LogReaderAgentJo
 
 $createReplSubFileContent | Out-File -Append $OutputFile
 
+
+# Check Distribution Agent execution history
+if($verbose) {
+    "$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "Add sql to check Distribution agent history.."
+}
+$checkReplDistributionHistoryFileContent = [System.IO.File]::ReadAllText($CheckReplDistributionHistoryFilePath)
+$checkReplDistributionHistoryFileContent = $checkReplDistributionHistoryFileContent.Replace("<PublicationNameHere>", "$PublicationNameNew")
+$checkReplDistributionHistoryFileContent = $checkReplDistributionHistoryFileContent.Replace("<PublisherDbNameHere>", "$PublisherDatabase")
+$checkReplDistributionHistoryFileContent = $checkReplDistributionHistoryFileContent.Replace("<DistributionDbNameHere>", "$DistributionDatabase")
+$checkReplDistributionHistoryFileContent = $checkReplDistributionHistoryFileContent.Replace("[PublisherServer]", "PublisherServer [$PublisherServer]")
+$checkReplDistributionHistoryFileContent = $checkReplDistributionHistoryFileContent.Replace("[DistributorServer]", "DistributorServer [$DistributorServer]")
+$checkReplDistributionHistoryFileContent = $checkReplDistributionHistoryFileContent.Replace("<TotalPublishedTablesCountHere>", "$tablesCount")
+
+$checkReplDistributionHistoryFileContent | Out-File -Append $OutputFile
 
 # Show output
 if($verbose) {

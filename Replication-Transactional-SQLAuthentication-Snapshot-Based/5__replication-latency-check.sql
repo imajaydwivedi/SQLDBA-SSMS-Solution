@@ -19,6 +19,6 @@ order by  InsertedDate_UTC
 "
 set quoted_identifier on;
 
-exec [<DistributorServer>].[DBA_Admin].dbo.sp_executesql @sql;
+exec [10.253.33.229].[DBA_Admin].dbo.sp_executesql @sql;
 go
 
