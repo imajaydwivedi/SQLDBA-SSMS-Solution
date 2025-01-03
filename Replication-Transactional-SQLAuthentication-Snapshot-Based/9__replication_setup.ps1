@@ -47,6 +47,7 @@ Param (
 [String]$createReplSubFileName = "9f__replication-create-subscription.sql"
 [String]$getPublicationDetailsFileName = "9g__replication-get-publication-details.sql"
 [String]$CheckReplDistributionHistoryFileName = "9h__replication-check-distribution-history.sql"
+[String]$CheckIdentityFileName = "9i__replication-check-identity.sql"
 
 $verbose = $false;
 if ($PSBoundParameters.ContainsKey('Verbose')) { # Command line specifies -Verbose[:$false]
@@ -83,6 +84,7 @@ $CheckReplSnapshotHistoryFilePath = "$ScriptsDirectory\$CheckReplSnapshotHistory
 $createReplSubFilePath = "$ScriptsDirectory\$createReplSubFileName"
 $getPublicationDetailsFilePath = "$ScriptsDirectory\$getPublicationDetailsFileName"
 $CheckReplDistributionHistoryFilePath = "$ScriptsDirectory\$CheckReplDistributionHistoryFileName"
+$CheckIdentityFilePath = "$ScriptsDirectory\$CheckIdentityFileName"
 
 # Trim PublisherServer
 $PublisherServer = $PublisherServer.Trim()
@@ -118,8 +120,6 @@ if($firstTable -match "(?'Schema'.+)\.(?'Table'.+)") {
 # Get connection to Distributor
 $conDistributorServer = Connect-DbaInstance -SqlInstance $DistributorServer -Database $DistributionDatabase -SqlCredential $SqlCredential -ClientName "Get-PublicationDetails" -TrustServerCertificate -EncryptConnection -ErrorAction Stop -Debug:$false
 
-
-
 if ($true)
 { 
     $sqlPublicationDetails = [System.IO.File]::ReadAllText($getPublicationDetailsFilePath)    
@@ -133,8 +133,6 @@ if ($true)
     $publicationDetails = @()
     $publicationDetails += $conDistributorServer | Invoke-DbaQuery -Query $sqlPublicationDetails -EnableException
 }
-
-Write-Debug "Compute Publication"
 
 # Compute publication name
 if ($publicationDetails.Count -gt 0) {
@@ -334,6 +332,93 @@ $checkReplDistributionHistoryFileContent = $checkReplDistributionHistoryFileCont
 
 $checkReplDistributionHistoryFileContent | Out-File -Append $OutputFile
 
+
+# Check/Reseed Identity in tables
+if($verbose) {
+    "$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "check/Reseed Identity in Tables.."
+}
+$sqlCheckIdentity = [System.IO.File]::ReadAllText($CheckIdentityFilePath)
+
+# Loop through tables, and get comma separated list of table names without schema
+$tableNamesWithoutSchema = @()
+foreach($tbl in $Table)
+{
+    # Extract table & schema name
+    $schemaName = 'dbo'
+    $tableName = $tbl.Trim()
+    if($tbl -match "(?'Schema'.+)\.(?'Table'.+)") {
+        $schemaName = $Matches['Schema']
+        $tableName = $Matches['Table']
+    }
+
+    $schemaName = $schemaName.Trim().Trim('[').Trim(']').Trim()
+    $tableName = $tableName.Trim().Trim('[').Trim(']').Trim()
+
+    $tableNamesWithoutSchema += $tableName
+}
+
+$tableNamesWithoutSchemaCSV = ($tableNamesWithoutSchema | ForEach-Object {"'$_'"}) -join ','
+$sqlCheckIdentity = $sqlCheckIdentity.Replace("<<table_names_without_schemas>>", "$tableNamesWithoutSchemaCSV")
+
+# collection to store result
+[System.Collections.ArrayList]$IdentityResult = @()
+
+# Fetch Identity Check for Publisher
+$conPublisherServer = Connect-DbaInstance -SqlInstance $PublisherServer -Database $PublisherDatabase -SqlCredential $SqlCredential -ClientName "(dba) IdentityCheck" -TrustServerCertificate -EncryptConnection -ErrorAction Stop -Debug:$false
+$sqlCheckIdentity4Publisher = $sqlCheckIdentity
+$sqlCheckIdentity4Publisher = $sqlCheckIdentity4Publisher.Replace("<server_name>", "$PublisherServer")
+#$resultIdentityCheckPublisher = @()
+#$resultIdentityCheckPublisher += 
+$conPublisherServer | Invoke-DbaQuery -Query $sqlCheckIdentity4Publisher -EnableException | ForEach-Object {$IdentityResult.Add($_)|Out-Null}
+
+# Fetch Identity Check for Subscriber
+$conSubscriberServer = Connect-DbaInstance -SqlInstance $SubscriberServer -Database $SubsciberDatabase -SqlCredential $SqlCredential -ClientName "(dba) IdentityCheck" -TrustServerCertificate -EncryptConnection -ErrorAction Stop -Debug:$false
+$sqlCheckIdentity4Subscriber = $sqlCheckIdentity
+$sqlCheckIdentity4Subscriber = $sqlCheckIdentity4Subscriber.Replace("<server_name>", "$SubscriberServer")
+$conSubscriberServer | Invoke-DbaQuery -Query $sqlCheckIdentity4Subscriber -EnableException | ForEach-Object {$IdentityResult.Add($_)|Out-Null}
+
+
+#$IdentityResult | ogv
+
+$tables4ReseedNeeded = @()
+$tables4ReseedNeeded += $IdentityResult | Where-Object {$_.is_reseed_needed}
+
+#Write-Debug "Debug here"
+
+if ($tables4ReseedNeeded.Count -gt 0) 
+{
+    foreach($srv_db_row in $($tables4ReseedNeeded | Select-Object -Property server_name, database_name -Unique)) 
+    {
+        $server_name = $srv_db_row.server_name
+        $database_name = $srv_db_row.database_name
+
+        @"
+/* ************************************************************************************************************
+** ********** Reseed Identity for tables on [$server_name].[$database_name] *************
+** ********************************************************************************************************** */
+
+use [$database_name];
+
+"@ | Out-File -Append $OutputFile
+
+        foreach($table_row in $($tables4ReseedNeeded | Where-Object {$_.server_name -eq $server_name -and $_.database_name -eq $database_name})) 
+        {        
+            $table_name = $table_row.table_name
+            $tsql_query = $table_row.tsql_to_reseed_identity
+
+            @"
+-- reseed table [$database_name].[$table_name]
+$tsql_query
+
+"@ | Out-File -Append $OutputFile
+        }
+    }
+}
+else {
+    "`n-- No identity reseed needed`n`n" | Out-File -Append $OutputFile
+}
+
+
 # Show output
 if($verbose) {
     "$(Get-Date -Format yyyyMMMdd_HHmm) {0,-10} {1}" -f 'INFO:', "open file '$OutputFile' in notepad.."
@@ -343,33 +428,36 @@ notepad $OutputFile
 
 <#
 cls
-$ReplLoginPassword = Read-Host "Enter ReplLoginPassword"
+#$ReplCredential = Get-Credential -UserName 'sa' -Message 'REPL'
+
 E:\Github\SQLMonitor\Work-TOM-GM-DR-Replication\9__replication_setup.ps1 `
         -DistributorServer 'SQLMonitor' `
-        -PublicationName "GPX_Exp__DBA_2_DBATools_SQLMonitor_Tbls" `
-        -PublisherServer 'Experiment,1432' `
-        -SubscriberServer 'Demo\SQL2019' `
+        -PublisherServer 'Demo\SQL2019' `
         -PublisherDatabase 'DBA' `
+        -SubscriberServer 'Experiment,1432' `
         -SubsciberDatabase 'DBATools' `
-        -Table @('dbo.file_io_stats','[dbo].[wait_stats]','dbo.xevent_metrics',' xevent_metrics_queries','sql_agent_job_stats') `
-        -ReplLoginName 'sa' -ReplLoginPassword $ReplLoginPassword `
-        -LoginsForReplAccess @('sa','grafana') `
-        -IncludeAddDistributorScripts $true `
+        -DataCenter NTT `
+        -SqlCredential $ReplCredential `
+        -Table @('dbo.file_io_stats','dbo.wait_stats','dbo.xevent_metrics','dbo.xevent_metrics_queries','dbo.sql_agent_job_stats') `
+        -ReplLoginName $ReplCredential.UserName `
+        -ReplLoginPassword $ReplCredential.GetNetworkCredential().Password `
+        -LoginsForReplAccess @('grafana') `
+        -IncludeAddDistributorScripts $false `
         -IncludeDropPublicationScripts $true `
         -Verbose -Debug
 
-cls
-$ReplLoginPassword = Read-Host "Enter ReplLoginPassword"
 E:\Github\SQLMonitor\Work-TOM-GM-DR-Replication\9__replication_setup.ps1 `
         -DistributorServer 'SQLMonitor' `
-        -PublicationName "NTT_Demo__DBA_2_DBATools_SQLMonitor_Tbls" `
-        -PublisherServer 'Demo\SQL2019' `
-        -SubscriberServer 'Experiment,1432' `
-        -PublisherDatabase 'DBA' `
-        -SubsciberDatabase 'DBATools' `
-        -Table @('dbo.file_io_stats','[dbo].[wait_stats]','dbo.xevent_metrics',' xevent_metrics_queries','sql_agent_job_stats') `
-        -ReplLoginName 'sa' -ReplLoginPassword $ReplLoginPassword `
-        -LoginsForReplAccess @('sa','grafana') `
+        -PublisherServer 'Experiment,1432' `
+        -PublisherDatabase 'DBATools' `
+        -SubscriberServer 'Demo\SQL2019' `
+        -DataCenter GPX `
+        -SubsciberDatabase 'DBA' `
+        -SqlCredential $ReplCredential `
+        -Table @('dbo.file_io_stats','dbo.wait_stats','dbo.xevent_metrics','dbo.xevent_metrics_queries','dbo.sql_agent_job_stats') `
+        -ReplLoginName $ReplCredential.UserName `
+        -ReplLoginPassword $ReplCredential.GetNetworkCredential().Password `
+        -LoginsForReplAccess @('grafana') `
         -IncludeAddDistributorScripts $false `
         -IncludeDropPublicationScripts $true `
         -Verbose -Debug
