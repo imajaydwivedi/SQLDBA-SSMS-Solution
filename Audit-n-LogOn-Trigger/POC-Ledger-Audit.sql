@@ -107,28 +107,25 @@ USE [master]
 GO
 CREATE LOGIN [ledger_service] WITH PASSWORD=N'<<SomeStringPassword>.', DEFAULT_DATABASE=[master], CHECK_EXPIRATION=OFF, CHECK_POLICY=OFF
 GO
-use [ScratchPad];
-GO
+
 USE [DBA]
 GO
 CREATE USER [ledger_service] FOR LOGIN [ledger_service]
 GO
-USE [DBA]
-GO
 ALTER ROLE [db_datareader] ADD MEMBER [ledger_service]
-GO
-USE [DBA]
 GO
 ALTER ROLE [db_datawriter] ADD MEMBER [ledger_service]
 GO
-use [DBA];
-GO
+
 USE [ScratchPad]
 GO
 CREATE USER [ledger_service] FOR LOGIN [ledger_service]
 GO
-
-GRANT INSERT, UPDATE ON dbo.trigger_audit TO ledger_service;
+GRANT INSERT ON dbo.trigger_audit TO ledger_service;
 go
+
+-- REVOKE UPDATE on dbo.trigger_audit TO ledger_service;
+go
+
 
 */
