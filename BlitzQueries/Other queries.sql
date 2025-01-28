@@ -633,54 +633,75 @@ end catch
 select * from #procs_with_compile_hint
 go
 
-
 /*	Find Forwarded Records using Cursor Method for VLDBs	*/
+use tempdb;
+
 SET NOCOUNT ON;
+
 IF OBJECT_ID('tempdb..#objects') IS NOT NULL
 	DROP TABLE #objects;
 create table #objects
-(dbID int, objectID int);
+(dbID int, dbName nvarchar(125), objectID int, TableName nvarchar(225));
+
 EXEC sp_msforeachdb '
 	use [?];
 	SET NOCOUNT ON;
-	insert #objects
-	(dbID, objectID)
-	select db_id() as dbID, o.object_id
-	from sys.objects as o inner join sys.schemas as s on s.schema_id = o.schema_id
-	inner join sys.indexes as i on i.object_id = o.object_id
-	where o.type_desc = ''USER_TABLE''
-	and i.type_desc = ''HEAP''
+
+	if db_name() not in (''tempdb'')
+	begin
+		insert #objects
+		(dbID, dbName, objectID, TableName)
+		select db_id() as dbID, DB_NAME() as dbName, o.object_id, s.name+''.''+o.name as TableName
+		from sys.objects as o inner join sys.schemas as s on s.schema_id = o.schema_id
+		inner join sys.indexes as i on i.object_id = o.object_id
+		where o.type_desc = ''USER_TABLE''
+		and i.type_desc = ''HEAP''
+	end
 ';
 --select * from #objects;
 
-IF OBJECT_ID('tempdb..#HeapFragTable') IS NOT NULL
-	DROP TABLE #HeapFragTable;
-CREATE table #HeapFragTable
+IF OBJECT_ID('dbo.HeapFragTable') IS NOT NULL
+	DROP TABLE dbo.HeapFragTable;
+CREATE table dbo.HeapFragTable
 (	dbName varchar(100), table_name varchar(100), forwarded_record_count int, avg_fragmentation_in_percent decimal(20,2), page_count bigint );
+
 declare @c_ObjectID int
 declare @c_dbID int
+declare @c_dbName nvarchar(125);
+declare @c_TableName nvarchar(125);
+declare @_errorMessage nvarchar(max);
 
 DECLARE curObjects CURSOR LOCAL FORWARD_ONLY FOR
-		select dbID, objectID from #objects;
+		select dbID, dbName, objectID, TableName from #objects;
 		
 OPEN curObjects  
 
-FETCH NEXT FROM curObjects INTO @c_dbID, @c_ObjectID
+FETCH NEXT FROM curObjects INTO @c_dbID, @c_dbName, @c_ObjectID, @c_TableName;
 
 WHILE @@FETCH_STATUS = 0  
 BEGIN  
-	--PRINT	@c_ObjectID;
-	insert into #HeapFragTable
-	SELECT DB_NAME(@c_dbID) AS dbName, OBJECT_NAME(object_id) AS table_name, forwarded_record_count, avg_fragmentation_in_percent, page_count
-	FROM sys.dm_db_index_physical_stats (@c_dbID, @c_ObjectID, DEFAULT, DEFAULT, 'DETAILED');
+	print 'Working on table '+quotename(@c_dbName)+'.'+@c_TableName+'..';
 
-	FETCH NEXT FROM curObjects INTO @c_dbID, @c_ObjectID
+	begin try
+		insert into dbo.HeapFragTable
+		SELECT DB_NAME(@c_dbID) AS dbName, OBJECT_NAME(object_id) AS table_name, forwarded_record_count, avg_fragmentation_in_percent, page_count
+		FROM sys.dm_db_index_physical_stats (@c_dbID, @c_ObjectID, DEFAULT, DEFAULT, 'DETAILED');
+	end try
+	begin catch
+		set @_errorMessage = ERROR_MESSAGE();
+		print 'Error occurred while working on table '+quotename(@c_dbName)+'.'+@c_TableName+'..';
+		print '  =>'
+		print @_errorMessage;
+		print '';
+	end catch
+
+	FETCH NEXT FROM curObjects INTO @c_dbID, @c_dbName, @c_ObjectID, @c_TableName;
 END
 
 CLOSE curObjects;  
 DEALLOCATE curObjects; 
 
-SELECT * FROM #HeapFragTable WHERE forwarded_record_count > 0 and table_name is not null
+SELECT * FROM dbo.HeapFragTable WHERE forwarded_record_count > 0 and table_name is not null
 GO
 
 use RDP
