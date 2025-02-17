@@ -24,6 +24,7 @@ SELECT rs.[restore_history_id]
  on rs.backup_set_id = bs.backup_set_id
  INNER JOIN msdb.dbo.backupmediafamily bmf 
  ON bs.media_set_id = bmf.media_set_id
- where rs.[destination_database_name] = 'Washington'
+ where 1=1
+ --and rs.[destination_database_name] = 'Washington'
  order by rs.[restore_date] desc
  GO
