@@ -6,7 +6,7 @@ EXEC sp_WhoIsActive @get_outer_command = 1, @get_task_info=2, @get_additional_in
 					--,@get_locks=1
 					,@get_plans=1
 					--,@sort_order = '[CPU] DESC'
-					,@filter = 156
+					--,@filter = 156
 					--,@filter_type = 'login' ,@filter = 'grafana'
 					--,@filter_type = 'program' ,@filter = 'sqlcmd'
 					--,@filter_type = 'database' ,@filter = 'tempdb'

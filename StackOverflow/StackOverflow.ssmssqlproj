@@ -67,6 +67,12 @@
           <AssociatedConnUserName />
           <FullPath>Help.sql</FullPath>
         </FileNode>
+        <FileNode Name="job.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:localhost:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>localhost</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>job.sql</FullPath>
+        </FileNode>
         <FileNode Name="QA - Find interesting unanswered questions.sql">
           <AssociatedConnectionMoniker />
           <AssociatedConnSrvName />
@@ -336,6 +342,12 @@
           <AssociatedConnSrvName />
           <AssociatedConnUserName />
           <FullPath>SCH - RPT-usp_Vanity_search_links_to_user_website_posted_by_other_people_4_during.sql</FullPath>
+        </FileNode>
+        <FileNode Name="SCH-RPT-usp_RptTopPostsByLocation.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>SCH-RPT-usp_RptTopPostsByLocation.sql</FullPath>
         </FileNode>
         <FileNode Name="Setup-IndexLab6.sql">
           <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:localhost:True</AssociatedConnectionMoniker>

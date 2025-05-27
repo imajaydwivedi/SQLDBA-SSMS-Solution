@@ -11,7 +11,7 @@ EXECUTE dbo.IndexOptimize /* Update Stats */
 			@PartitionLevel = 'Y',
 			--@Indexes = 'AdventureWorks.Production.Product',
 			@MSShippedObjects = 'Y',
-			@DatabasesInParallel = 'Y'
+			@DatabasesInParallel = 'N'
 go
 
 

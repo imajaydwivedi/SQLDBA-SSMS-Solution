@@ -30,6 +30,7 @@ Query Performance
 ----------------------
 8671 -> spend more time compiling plans, ignore "good enough plan found"
 2453 -> table variables can trigger recompile when rows are inserted
+8649 -> ignore parallelism operator cost when considering Parallel Plan
 
 
 OPTION (QUERYTRACEON 8671)

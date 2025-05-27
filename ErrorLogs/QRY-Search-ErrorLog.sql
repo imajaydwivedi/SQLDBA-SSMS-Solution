@@ -12,11 +12,14 @@ end
 declare @start_time datetime, @end_time datetime, @err_msg_1 nvarchar(256) = null, @err_msg_2 nvarchar(256) = null;
 --set @start_time = '2023-09-27 06:14' --  August 22, 2020 05:16:00
 --set @time = DATEADD(HOUR,-1,getdate());
-set @start_time = DATEADD(HOUR,-1*1,getdate());
+set @start_time = DATEADD(hour,-2*1,getdate());
 --set @end_time = '2023-09-27 06:35';
 set @end_time = GETDATE()
 --set @end_time = DATEADD(minute,30*1,@start_time)
---set @err_msg_1 = 'Unable to open the physical file'
+--set @err_msg_1 = 'Starting up database ''tempdb'''
+--set @err_msg_1 = 'A connection timeout has occurred'
+--set @err_msg_1 = 'failover cluster'
+--set @err_msg_1 = 'The availability replica manager is going offline'
 --set @err_msg_1 = 'There is insufficient system memory in resource pool'
 --set @err_msg_1 = 'Internal'
 --set @err_msg_1 = 'config'

@@ -10,8 +10,9 @@ CREATE TABLE [dbo].[connection_limit_config]
 	[program_name] sysname not null,
 	[host_name] sysname not null,
 	[limit] smallint,
-	[reference] varchar(255) null,
-	constraint pk_connection_limit_threshold primary key ([login_name],[program_name],[host_name])
+	[reference] varchar(255) null
+	
+	,index ci_connection_limit_threshold unique clustered ([login_name], [program_name], [host_name])
 )
 GO
 GRANT SELECT ON [dbo].[connection_limit_config] TO [public]
@@ -22,8 +23,8 @@ CREATE TABLE [dbo].[connection_limit_threshold_history]
 (
 	[id] int IDENTITY(1,1) NOT NULL,
 	[login_name] sysname not null,
-	[program_name] sysname    NOT NULL,
-	[host_name] sysname not null,
+	[program_name] sysname NULL,
+	[host_name] sysname null,
 	[limit] smallint    NULL,
 	[collection_time] datetime2 NOT NULL,
 	[changed_by] sysname not NULL,
@@ -100,7 +101,8 @@ INSERT INTO [dbo].[connection_limit_config]
 ([login_name], [program_name], [host_name], [limit])
 --SELECT [login_name] = '*', [program_name] = '*', [host_name] = '*', [limit] = 250
 --UNION ALL
-SELECT [login_name] = 'grafana', [program_name] = '*', [host_name] = '*', [limit] = 20;
+--SELECT [login_name] = 'grafana', [program_name] = '*', [host_name] = HOST_NAME(), [limit] = 20;
+SELECT [login_name] = 'grafana', [program_name] = '*', [host_name] = '*', [limit] = 50;
 
 select * from [dbo].[connection_limit_config]
 GO
@@ -208,7 +210,7 @@ BEGIN
 							(case when [host_name] = @host_name then 100 else 0 end) +
 							(case when [host_name] = '*' then 5 else 0 end) as [score], *
 					FROM master.dbo.connection_limit_config WITH (NOLOCK)
-					WHERE ([login_name] = @login_name  or [login_name] = '*')
+					WHERE [login_name] = @login_name
 					and ([program_name] = isnull(@app_name,'*') or [program_name] = '*')
 					and ([host_name] = @host_name or [host_name] = '*')
 					order by [score] desc

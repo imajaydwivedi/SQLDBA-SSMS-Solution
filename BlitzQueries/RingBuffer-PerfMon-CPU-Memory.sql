@@ -15,7 +15,7 @@ DECLARE @top_x_query_rows SMALLINT = 10;
 DECLARE @long_running_query_threshold_minutes INT = 10;
 DECLARE @get_blitz_analysis BIT = 0;
 DECLARE @only_X_resultset smallint = -1;
-DECLARE @show_plan TINYINT = 0; /* 0 = no plan, 1 = query plan, 2 = batch plan */
+DECLARE @show_plan TINYINT = 1; /* 0 = no plan, 1 = query plan, 2 = batch plan */
 DECLARE @all_requests TINYINT = 1;
 DECLARE @granted_memory_threshold_mb decimal(20,2) = 500.00;
 DECLARE @show_io_latency BIT = 1;

@@ -18,3 +18,7 @@
 /Office*/*
 /Personal*/*
 /Work*/*
+Untitled*.sql
+Untitled*.ipynb
+Untitled*.txt
+.DS_Store

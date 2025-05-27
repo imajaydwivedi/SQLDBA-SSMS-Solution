@@ -1,0 +1,88 @@
+<?xml version="1.0"?>
+<SqlWorkbenchSqlProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" Name="Replication-Transactional-SQLAuthentication-Snapshot-Based">
+  <Items>
+    <LogicalFolder Name="Connections" Type="2" Sorted="true">
+      <Items>
+        <ConnectionNode Name="localhost:21L-LTPABL-1187\Ajay">
+          <Created>2024-09-13T14:09:48.4439487+05:30</Created>
+          <Type>SQL</Type>
+          <Server>localhost</Server>
+          <UserName />
+          <Authentication>Windows Authentication</Authentication>
+          <InitialDB>DBA</InitialDB>
+          <LoginTimeout>30</LoginTimeout>
+          <ExecutionTimeout>0</ExecutionTimeout>
+          <ConnectionProtocol>NotSpecified</ConnectionProtocol>
+          <ApplicationName>DotNetApp</ApplicationName>
+        </ConnectionNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Queries" Type="0" Sorted="true">
+      <Items>
+        <FileNode Name="4__logon-trigger.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:localhost:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>localhost</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>4__logon-trigger.sql</FullPath>
+        </FileNode>
+        <FileNode Name="5__replication-latency-check.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>5__replication-latency-check.sql</FullPath>
+        </FileNode>
+        <FileNode Name="8__drop-replication-publication.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>8__drop-replication-publication.sql</FullPath>
+        </FileNode>
+        <FileNode Name="9a__replication-add-distributor.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>9a__replication-add-distributor.sql</FullPath>
+        </FileNode>
+        <FileNode Name="9b__replication-create-publication.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>9b__replication-create-publication.sql</FullPath>
+        </FileNode>
+        <FileNode Name="9c__replication-add-articles.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>9c__replication-add-articles.sql</FullPath>
+        </FileNode>
+        <FileNode Name="9d__replication-start-snapshot-agent.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>9d__replication-start-snapshot-agent.sql</FullPath>
+        </FileNode>
+        <FileNode Name="9e__replication-check-snapshot-history.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>9e__replication-check-snapshot-history.sql</FullPath>
+        </FileNode>
+        <FileNode Name="9f__replication-create-subscription.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>9f__replication-create-subscription.sql</FullPath>
+        </FileNode>
+        <FileNode Name="temp-output-Create-Replication-Publication.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>temp-output-Create-Replication-Publication.sql</FullPath>
+        </FileNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Miscellaneous" Type="3" Sorted="true">
+      <Items />
+    </LogicalFolder>
+  </Items>
+</SqlWorkbenchSqlProject>
