@@ -417,7 +417,8 @@ INNER JOIN sys.database_principals AS grantor
     ON grantor.principal_id = grantor_principal_id
 ORDER BY grantee_name, granted_on_name
 
-SELECT roles.name AS role_name
+SELECT DB_NAME() as [db_name],
+    roles.name AS role_name
     , roles.principal_id
     , roles.type AS role_type
     , roles.type_desc AS role_type_desc
