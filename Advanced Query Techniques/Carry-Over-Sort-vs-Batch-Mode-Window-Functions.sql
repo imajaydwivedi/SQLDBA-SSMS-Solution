@@ -67,10 +67,6 @@ if OBJECT_ID('tempdb..#t') is null
 						OwnerUserId_Str = convert(varchar(10), p.OwnerUserId),
 						Id_Str = convert(varchar(10), p.Id)
 				) ca_i
-	--cross apply (values (convert(char(8), p.CreationDate, 112),
-	--					 convert(varchar(10), p.OwnerUserId),
-	--					 convert(varchar(10), p.Id))
-	--			) ca_i(CreationDate_Str, OwnerUserId_Str, Id_Str)
 	group by p.PostTypeId
 )
 select	cte.PostTypeId,
@@ -82,10 +78,6 @@ cross apply (select CreationDate_Str = SUBSTRING(cte.cols, 1, 8),
 					OwnerUserId_Str = SUBSTRING(cte.cols, 9, 10),
 					Id_Str = SUBSTRING(cte.cols, 19, 10)
 		) ca_o
---cross apply ( values (SUBSTRING(cte.cols, 1, 8),
---					 SUBSTRING(cte.cols, 9, 10),
---					 SUBSTRING(cte.cols, 19, 10))
---			) ca_o(CreationDate_Str, OwnerUserId_Str, Id_Str)
 order by cte.PostTypeId
 option (use hint('query_optimizer_compatibility_level_140'));
 
