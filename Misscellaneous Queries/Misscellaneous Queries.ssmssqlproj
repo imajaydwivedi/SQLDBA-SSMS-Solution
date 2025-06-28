@@ -3,7 +3,7 @@
   <Items>
     <LogicalFolder Name="Connections" Type="2" Sorted="true">
       <Items>
-        <ConnectionNode Name="(local):21L-LTPABL-1187\Ajay">
+        <ConnectionNode Name="(local):LAB\adwivedi">
           <Created>2023-12-08T09:31:21.93053+05:30</Created>
           <Type>SQL</Type>
           <Server>(local)</Server>
@@ -11,11 +11,13 @@
           <Authentication>Windows Authentication</Authentication>
           <InitialDB />
           <LoginTimeout>30</LoginTimeout>
+          <TrustServerCertificate>False</TrustServerCertificate>
+          <EncryptionOption>True</EncryptionOption>
           <ExecutionTimeout>0</ExecutionTimeout>
           <ConnectionProtocol>NotSpecified</ConnectionProtocol>
           <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
         </ConnectionNode>
-        <ConnectionNode Name="localhost:21L-LTPABL-1187\Ajay">
+        <ConnectionNode Name="localhost:LAB\adwivedi">
           <Created>2022-05-12T10:19:50.7199948+05:30</Created>
           <Type>SQL</Type>
           <Server>localhost</Server>
@@ -23,6 +25,8 @@
           <Authentication>Windows Authentication</Authentication>
           <InitialDB />
           <LoginTimeout>30</LoginTimeout>
+          <TrustServerCertificate>False</TrustServerCertificate>
+          <EncryptionOption>True</EncryptionOption>
           <ExecutionTimeout>0</ExecutionTimeout>
           <ConnectionProtocol>NotSpecified</ConnectionProtocol>
           <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
@@ -288,6 +292,18 @@
           <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
           <AssociatedConnUserName />
           <FullPath>TempDb-Shrink-LogFile-Loop.sql</FullPath>
+        </FileNode>
+        <FileNode Name="UPSERT-Scenario-with-SERIALIZABLE.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>UPSERT-Scenario-with-SERIALIZABLE.sql</FullPath>
+        </FileNode>
+        <FileNode Name="UPSERT-Scenario-with-sp_getapplock.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>UPSERT-Scenario-with-sp_getapplock.sql</FullPath>
         </FileNode>
         <FileNode Name="VSCode-Settings-General.sql">
           <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>

@@ -22,6 +22,12 @@
     </LogicalFolder>
     <LogicalFolder Name="Queries" Type="0" Sorted="true">
       <Items>
+        <FileNode Name="Carry-Over-Sort-vs-Batch-Mode-Window-Functions.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>Carry-Over-Sort-vs-Batch-Mode-Window-Functions.sql</FullPath>
+        </FileNode>
         <FileNode Name="Itzik-Ben-Gan.sql">
           <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
           <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
