@@ -30,8 +30,7 @@
 ******************************************************************************/
 
 
-
-USE [AdventureWorks2019];
+USE [adventureworks2025];
 GO
 
 IF OBJECT_ID('Sales.SalesOrderHeaderEnlarged') IS NOT NULL
@@ -223,3 +222,5 @@ ORDER BY sod.SalesOrderDetailID
 
 COMMIT
 GO 5
+
+

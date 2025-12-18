@@ -24,7 +24,7 @@ order by row_id asc
 offset 0 rows fetch next 200 rows only;
 go
 
--- What if I don't want to sory by any column and still want row numbering?
+-- What if I don't want to sort by any column and still want row numbering?
 	-- "Constant Folding" concept leads to saving SORT order
 select u.Id, u.DisplayName, u.Reputation, u.Location
 		--,row_id = ROW_NUMBER() over (order by @@spid desc)
