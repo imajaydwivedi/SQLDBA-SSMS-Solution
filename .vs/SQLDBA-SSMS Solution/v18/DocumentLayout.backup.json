@@ -3,8 +3,8 @@
   "WorkspaceRootPath": "E:\\Github\\SQLDBA-SSMS-Solution\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{DAB50F5A-426A-4F81-9B01-E7A48FABB538}|Baselining\\Baselining.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\Baselining\\QRY-Find-Extended-Events.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{DAB50F5A-426A-4F81-9B01-E7A48FABB538}|Baselining\\Baselining.ssmssqlproj|solutionrelative:Baselining\\QRY-Find-Extended-Events.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
+      "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\RingBuffer-PerfMon-CPU-Memory.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
+      "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\RingBuffer-PerfMon-CPU-Memory.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
     }
   ],
   "DocumentGroupContainers": [
@@ -23,13 +23,13 @@
             {
               "$type": "Document",
               "DocumentIndex": 0,
-              "Title": "QRY-Find-Extended-Events.sql - localhost.master (LAB\\adwivedi (90))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\Baselining\\QRY-Find-Extended-Events.sql",
-              "RelativeDocumentMoniker": "Baselining\\QRY-Find-Extended-Events.sql",
-              "ToolTip": "QRY-Find-Extended-Events.sql - localhost.master (LAB\\adwivedi (90))",
+              "Title": "RingBuffer-PerfMon-CPU-Memory.sql - (local).DBA (LAB\\adwivedi (135))",
+              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\RingBuffer-PerfMon-CPU-Memory.sql",
+              "RelativeDocumentMoniker": "BlitzQueries\\RingBuffer-PerfMon-CPU-Memory.sql",
+              "ToolTip": "RingBuffer-PerfMon-CPU-Memory.sql - (local).DBA (LAB\\adwivedi (135))",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2025-12-22T05:26:30.208Z",
-              "EditorCaption": " - localhost.master (LAB\\adwivedi (90))"
+              "WhenOpened": "2026-01-10T00:11:57.023Z",
+              "EditorCaption": " - (local).DBA (LAB\\adwivedi (135))"
             }
           ]
         }

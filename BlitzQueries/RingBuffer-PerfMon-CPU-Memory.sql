@@ -1,8 +1,8 @@
 --	https://www.sqlskills.com/blogs/jonathan/identifying-external-memory-pressure-with-dm_os_ring_buffers-and-ring_buffer_resource_monitor/
 USE master;
 
-/*	Version:			v0.2
-	Update Date:		25-Mar-2022
+/*	Version:			v0.3
+	Update Date:		10-Jan-2026
 */
 
 SET NOCOUNT ON; 
@@ -15,7 +15,7 @@ DECLARE @top_x_query_rows SMALLINT = 10;
 DECLARE @long_running_query_threshold_minutes INT = 10;
 DECLARE @get_blitz_analysis BIT = 0;
 DECLARE @only_X_resultset smallint = -1;
-DECLARE @show_plan TINYINT = 1; /* 0 = no plan, 1 = query plan, 2 = batch plan */
+DECLARE @show_plan TINYINT = 0; /* 0 = no plan, 1 = query plan, 2 = batch plan */
 DECLARE @all_requests TINYINT = 1;
 DECLARE @granted_memory_threshold_mb decimal(20,2) = 500.00;
 DECLARE @show_io_latency BIT = 1;
@@ -141,7 +141,7 @@ WHERE	s.session_id != @@SPID
 
 /* Get Metrics related to Memory/Blockings */
 declare @object_name varchar(255);
-set @object_name = (case when @@SERVICENAME = 'MSSQLSERVER' then 'SQLServer' else 'MSSQL$'+@@SERVICENAME end);
+set @object_name = (case when coalesce(@@servicename,'MSSQLSERVER') = 'MSSQLSERVER' then 'SQLServer' else 'MSSQL$'+@@SERVICENAME end);
 
 ;with t_PerfMon as
 (
@@ -181,16 +181,12 @@ DECLARE @system_cpu_utilization VARCHAR(2000);
 DECLARE @sql_cpu_utilization VARCHAR(2000);
 ;WITH T_Cpu_Ring_Buffer AS
 (
-	SELECT	EventTime,
-			CASE WHEN system_cpu_utilization_post_sp2 IS NOT NULL THEN system_cpu_utilization_post_sp2 ELSE system_cpu_utilization_pre_sp2 END AS system_cpu_utilization,  
-			CASE WHEN sql_cpu_utilization_post_sp2 IS NOT NULL THEN sql_cpu_utilization_post_sp2 ELSE sql_cpu_utilization_pre_sp2 END AS sql_cpu_utilization 
+	SELECT	EventTime, system_cpu_utilization, sql_cpu_utilization 
 			,ROW_NUMBER()OVER(PARTITION BY CAST(EventTime as smalldatetime) ORDER BY EventTime ASC) as cpu_minute_id
 	FROM  (	SELECT	record.value('(Record/@id)[1]', 'int') AS record_id,
 					DATEADD (ms, -1 * (ts_now - [timestamp]), GETDATE()) AS EventTime,
-					100-record.value('(Record/SchedulerMonitorEvent/SystemHealth/SystemIdle)[1]', 'int') AS system_cpu_utilization_post_sp2, 
-					record.value('(Record/SchedulerMonitorEvent/SystemHealth/ProcessUtilization)[1]', 'int') AS sql_cpu_utilization_post_sp2,
-					100-record.value('(Record/SchedluerMonitorEvent/SystemHealth/SystemIdle)[1]', 'int') AS system_cpu_utilization_pre_sp2,
-					record.value('(Record/SchedluerMonitorEvent/SystemHealth/ProcessUtilization)[1]', 'int') AS sql_cpu_utilization_pre_sp2
+					100-record.value('(Record/SchedulerMonitorEvent/SystemHealth/SystemIdle)[1]', 'int') AS system_cpu_utilization,
+					record.value('(Record/SchedulerMonitorEvent/SystemHealth/ProcessUtilization)[1]', 'int') AS sql_cpu_utilization
 			FROM (	SELECT	timestamp, CONVERT (xml, record) AS record, cpu_ticks / (cpu_ticks/ms_ticks) as ts_now
 					FROM sys.dm_os_ring_buffers cross apply sys.dm_os_sys_info
 					WHERE ring_buffer_type = 'RING_BUFFER_SCHEDULER_MONITOR'

@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # SQL Server Management Studio Version 22
-VisualStudioVersion = 18.0.11205.157 d18.0
+VisualStudioVersion = 18.0.11205.157
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "BlitzQueries", "BlitzQueries\BlitzQueries.ssmssqlproj", "{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}"
 EndProject
@@ -158,7 +158,7 @@ Global
 		{5005EED8-9C3E-4B74-8BDF-BC298681AE36}.Default|Default.ActiveCfg = Default
 		{A35A7096-8C4E-48A6-92B1-A1BFD6D3D706}.Default|Default.ActiveCfg = Default
 		{17C9B87C-3499-4A57-A272-058810F44979}.Default|Default.ActiveCfg = Default
-		{ECE01E98-4274-4D53-B664-42E11305E7FE}.Default|Default.ActiveCfg = Default
+		{30A5688B-6661-4D24-968C-12A86E7CCC9B}.Default|Default.ActiveCfg = Default
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
