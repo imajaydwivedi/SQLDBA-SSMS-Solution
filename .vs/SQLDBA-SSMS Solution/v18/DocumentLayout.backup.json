@@ -19,14 +19,14 @@
             {
               "$type": "Document",
               "DocumentIndex": 0,
-              "Title": "Change Data Capture - CDC.sql - (local).CDCDemo (LAB\\adwivedi (66))",
+              "Title": "Change Data Capture - CDC.sql - AgHost-1A.CDCDemo (LAB\\adwivedi (66))",
               "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\Misscellaneous Queries\\Change Data Capture - CDC.sql",
               "RelativeDocumentMoniker": "Misscellaneous Queries\\Change Data Capture - CDC.sql",
-              "ToolTip": "Change Data Capture - CDC.sql - (local).CDCDemo (LAB\\adwivedi (66))",
+              "ToolTip": "Change Data Capture - CDC.sql - AgHost-1A.CDCDemo (LAB\\adwivedi (66))",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
               "WhenOpened": "2026-03-05T11:40:44.264Z",
               "IsPinned": true,
-              "EditorCaption": " - (local).CDCDemo (LAB\\adwivedi (66))"
+              "EditorCaption": " - AgHost-1A.CDCDemo (LAB\\adwivedi (66))"
             },
             {
               "$type": "Bookmark",
