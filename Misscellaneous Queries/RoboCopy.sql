@@ -28,7 +28,10 @@ robocopy SourcePath DestinationPath FileFullName /it /zb
 
 -- Copy all files/folders including Empty directories
 Robocopy \\SourceDbServer\F$\AllProd F:\AllProd /S /E /MT
-robocopy \\sqlmonitor\f$\SQLServer2019-x64-ENU-Dev $env:USERPROFILE\Downloads\SQLServer2019-x64-ENU-Dev /S /E /J /MT:4
 
--- Copy entire folder from SQLMonitor to other server
-robocopy f:\SQLServer2019-x64-ENU-Dev \\aghost-2b\d$\SQLServer2019-x64-ENU-Dev /S /E /J /MIR /FFT /MT:4
+-- Pull entire folder from SQLMonitor to current server
+robocopy \\sqlmonitor\f$\SQLServer2019-x64-ENU-Dev $env:USERPROFILE\Downloads\SQLServer2019-x64-ENU-Dev /S /E /J /MIR /FFT /MT:4
+
+-- Push entire folder from current server to AgHost-2B
+robocopy F:\SQLServer2019-x64-ENU-Dev \\AgHost-2B\d$\SQLServer2019-x64-ENU-Dev /S /E /J /MIR /FFT /MT:4
+
