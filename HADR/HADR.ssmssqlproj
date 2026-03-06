@@ -27,6 +27,12 @@
           <AssociatedConnUserName />
           <FullPath>AG Setup - Certificate Based.sql</FullPath>
         </FileNode>
+        <FileNode Name="AG_without_WSFC.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>AG_without_WSFC.sql</FullPath>
+        </FileNode>
         <FileNode Name="Mirroring Setup - Certificate Based.sql">
           <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
           <AssociatedConnSrvName>(local)</AssociatedConnSrvName>

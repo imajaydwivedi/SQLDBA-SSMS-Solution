@@ -1,12 +1,7 @@
 {
   "Version": 1,
   "WorkspaceRootPath": "E:\\Github\\SQLDBA-SSMS-Solution\\",
-  "Documents": [
-    {
-      "AbsoluteMoniker": "D:0:0:{77970B04-2242-40A2-98C1-A70538432873}|Misscellaneous Queries\\Misscellaneous Queries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\Misscellaneous Queries\\Change Data Capture - CDC.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{77970B04-2242-40A2-98C1-A70538432873}|Misscellaneous Queries\\Misscellaneous Queries.ssmssqlproj|solutionrelative:Misscellaneous Queries\\Change Data Capture - CDC.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
-    }
-  ],
+  "Documents": [],
   "DocumentGroupContainers": [
     {
       "Orientation": 0,
@@ -14,20 +9,8 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 0,
+          "SelectedChildIndex": -1,
           "Children": [
-            {
-              "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "Change Data Capture - CDC.sql - AgHost-1A.CDCDemo (LAB\\adwivedi (66))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\Misscellaneous Queries\\Change Data Capture - CDC.sql",
-              "RelativeDocumentMoniker": "Misscellaneous Queries\\Change Data Capture - CDC.sql",
-              "ToolTip": "Change Data Capture - CDC.sql - AgHost-1A.CDCDemo (LAB\\adwivedi (66))",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-03-05T11:40:44.264Z",
-              "IsPinned": true,
-              "EditorCaption": " - AgHost-1A.CDCDemo (LAB\\adwivedi (66))"
-            },
             {
               "$type": "Bookmark",
               "Name": "ST:0:0:{1c4feeaa-4718-4aa9-859d-94ce25d182ba}"
