@@ -27,4 +27,8 @@ robocopy \\SourceServer\F$\dump\ I:\Backups\CW\Logs\ *.csq /is
 robocopy SourcePath DestinationPath FileFullName /it /zb
 
 -- Copy all files/folders including Empty directories
-Robocopy /S /E  \\SourceDbServer\F:\AllProd F:\AllProd /MT
+Robocopy \\SourceDbServer\F$\AllProd F:\AllProd /S /E /MT
+robocopy \\sqlmonitor\f$\SQLServer2019-x64-ENU-Dev $env:USERPROFILE\Downloads\SQLServer2019-x64-ENU-Dev /S /E /J /MT:4
+
+-- Copy entire folder from SQLMonitor to other server
+robocopy f:\SQLServer2019-x64-ENU-Dev \\aghost-2b\d$\SQLServer2019-x64-ENU-Dev /S /E /J /MIR /FFT /MT:4
