@@ -1,16 +1,7 @@
 {
   "Version": 1,
   "WorkspaceRootPath": "E:\\Github\\SQLDBA-SSMS-Solution\\",
-  "Documents": [
-    {
-      "AbsoluteMoniker": "D:0:0:{4F63B99E-2F65-4EDE-B2B4-295A9AB4FC58}|HADR\\HADR.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\HADR\\AG_without_WSFC.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{4F63B99E-2F65-4EDE-B2B4-295A9AB4FC58}|HADR\\HADR.ssmssqlproj|solutionrelative:HADR\\AG_without_WSFC.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{4F63B99E-2F65-4EDE-B2B4-295A9AB4FC58}|HADR\\HADR.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\HADR\\AG Setup - Certificate Based.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{4F63B99E-2F65-4EDE-B2B4-295A9AB4FC58}|HADR\\HADR.ssmssqlproj|solutionrelative:HADR\\AG Setup - Certificate Based.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
-    }
-  ],
+  "Documents": [],
   "DocumentGroupContainers": [
     {
       "Orientation": 0,
@@ -18,33 +9,15 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 1,
+          "SelectedChildIndex": -1,
           "Children": [
             {
               "$type": "Bookmark",
+              "Name": "ST:0:0:{dc370b2d-b95e-4609-85c7-9e85fcd5539a}"
+            },
+            {
+              "$type": "Bookmark",
               "Name": "ST:0:0:{1c4feeaa-4718-4aa9-859d-94ce25d182ba}"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "AG_without_WSFC.sql - (local).DBA (LAB\\adwivedi (64))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\HADR\\AG_without_WSFC.sql",
-              "RelativeDocumentMoniker": "HADR\\AG_without_WSFC.sql",
-              "ToolTip": "AG_without_WSFC.sql - (local).DBA (LAB\\adwivedi (64))",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-03-06T03:33:13.288Z",
-              "EditorCaption": " - (local).DBA (LAB\\adwivedi (64))"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 1,
-              "Title": "AG Setup - Certificate Based.sql - (local).DBA (LAB\\adwivedi (58))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\HADR\\AG Setup - Certificate Based.sql",
-              "RelativeDocumentMoniker": "HADR\\AG Setup - Certificate Based.sql",
-              "ToolTip": "AG Setup - Certificate Based.sql - (local).DBA (LAB\\adwivedi (58))",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-03-06T03:32:25.035Z",
-              "EditorCaption": " - (local).DBA (LAB\\adwivedi (58))"
             }
           ]
         }

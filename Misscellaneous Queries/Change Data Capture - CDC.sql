@@ -59,7 +59,8 @@ set Position = 'Sr Analyst'
 where FirstName = 'Anant';
 
 -- Step 8: View change data in CDC tables
-select * from cdc.dbo_Employees_CT;
+select * from Employees where EmployeeID = 1002;
+select * from cdc.dbo_Employees_CT where EmployeeID = 1002;
 
 delete from Employees
 where EmployeeID = 1;
@@ -91,6 +92,15 @@ EXEC sys.sp_cdc_add_job @job_type = N'capture';
 EXEC sys.sp_cdc_add_job @job_type = N'cleanup';
 go
 
+-- Step 12: Validate if changes are synching even if jobs are recreated with new job_ids on all replicas.
+:CONNECT AgHost-1A -C
+select @@servername, * from CDCDemo.cdc.dbo_Employees_CT;
+go
+
+:CONNECT AgHost-1B -C
+select @@servername, * from CDCDemo.cdc.dbo_Employees_CT;
+go
+
 
 /* Questions
 1. What happens if cdc jobs are missing on new primary, and data is inserted?
@@ -110,6 +120,14 @@ Answer => Healthy. I tested with database name of 56 characters long
 
 3. Does re-run of the sys.sp_cdc_add_job cause any issue?
 Answer => Healthy. No error is thrown if the jobs already exist.
-*/
 
+4. With this soluation, are jobs on different servers created with same Job_ID? If yes, does it cause issues post failover?
+Answer => No. Job_ID is auto generated. So will be different on all replicas.
+
+Aspect 01: Failover, but NO SQLService restart
+In this case, we need to start the jobs using msdb.dbo.sp_start_job.
+
+Aspect 02: Failover with SQLService restart
+In this case, no manual action is need since CDC jobs are configured to start with agent.
+*/
 
