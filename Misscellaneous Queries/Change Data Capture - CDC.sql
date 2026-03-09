@@ -129,5 +129,10 @@ In this case, we need to start the jobs using msdb.dbo.sp_start_job.
 
 Aspect 02: Failover with SQLService restart
 In this case, no manual action is need since CDC jobs are configured to start with agent.
+
+
+Msg 22911, Level 16, State 1, Procedure sys.sp_MScdc_tranrepl_check, Line 21 [Batch Start Line 90]
+The capture job cannot be used by Change Data Capture to extract changes from the log when transactional replication is also enabled on the same database. When Change Data Capture and transactional replication are both enabled on a database, use the logreader agent to extract the log changes.
+
 */
 
