@@ -3,6 +3,9 @@
   "WorkspaceRootPath": "E:\\Github\\SQLDBA-SSMS-Solution\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\adwivedi\\AppData\\Local\\Temp\\1\\q5jq3vty..sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{77970B04-2242-40A2-98C1-A70538432873}|Misscellaneous Queries\\Misscellaneous Queries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\Misscellaneous Queries\\Change Data Capture - CDC.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
       "RelativeMoniker": "D:0:0:{77970B04-2242-40A2-98C1-A70538432873}|Misscellaneous Queries\\Misscellaneous Queries.ssmssqlproj|solutionrelative:Misscellaneous Queries\\Change Data Capture - CDC.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
     }
@@ -27,13 +30,23 @@
             {
               "$type": "Document",
               "DocumentIndex": 0,
-              "Title": "Change Data Capture - CDC.sql - AgHost-1A.CDCDemo (LAB\\adwivedi (63))",
+              "Title": "q5jq3vty..sql - not connected",
+              "DocumentMoniker": "C:\\Users\\adwivedi\\AppData\\Local\\Temp\\1\\q5jq3vty..sql",
+              "ToolTip": "C:\\Users\\adwivedi\\AppData\\Local\\Temp\\1\\q5jq3vty..sql - not connected",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
+              "WhenOpened": "2026-03-11T17:06:05.745Z",
+              "EditorCaption": " - not connected"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "Change Data Capture - CDC.sql - not connected",
               "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\Misscellaneous Queries\\Change Data Capture - CDC.sql",
               "RelativeDocumentMoniker": "Misscellaneous Queries\\Change Data Capture - CDC.sql",
-              "ToolTip": "Change Data Capture - CDC.sql - AgHost-1A.CDCDemo (LAB\\adwivedi (63))",
+              "ToolTip": "Change Data Capture - CDC.sql - not connected",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
               "WhenOpened": "2026-03-09T05:21:30.044Z",
-              "EditorCaption": " - AgHost-1A.CDCDemo (LAB\\adwivedi (63))"
+              "EditorCaption": " - not connected"
             }
           ]
         }

@@ -101,6 +101,39 @@ go
 select @@servername, * from CDCDemo.cdc.dbo_Employees_CT;
 go
 
+-- Automation: Automatically create CDC Jobs if missing
+declare @sql_create_job nvarchar(max);
+declare cursor_cdc_jobs cursor local fast_forward for 
+	select	--j_exp.cdc_job_name, j_exp.job_type, jv.job_id, jv.job_category, [job_exists],
+			[re_create_job] = case when j_exp.job_type = 'capture' then 'use '+quotename(d.name)+'; EXEC sys.sp_cdc_add_job @job_type = N''capture'';'
+									else 'use '+quotename(d.name)+'; EXEC sys.sp_cdc_add_job @job_type = N''cleanup'';'
+									end
+	from master.sys.databases d
+	outer apply (values ('capture', 'cdc.'+d.name+'_capture'),('cleanup','cdc.'+d.name+'_cleanup')) j_exp(job_type, cdc_job_name)
+	outer apply (	select jv.job_id, jc.name as job_category
+					from msdb.dbo.sysjobs_view jv 
+					left join msdb.dbo.syscategories jc
+						on jc.category_id = jv.category_id
+					where jv.name = j_exp.cdc_job_name
+				) jv
+	outer apply (select [job_exists] = case when jv.job_id is not null then cast(1 as bit) else cast(0 as bit) end) jv_exists
+	where d.is_cdc_enabled = 1
+	--and [job_exists] = 0;
+
+open cursor_cdc_jobs;
+fetch next from cursor_cdc_jobs into @sql_create_job;
+
+while @@fetch_status = 0
+begin
+	--print @sql_create_job;
+	exec sp_executesql @sql_create_job;
+	fetch next from cursor_cdc_jobs into @sql_create_job;
+end
+
+close cursor_cdc_jobs;
+deallocate cursor_cdc_jobs;
+go
+
 
 /* Questions
 1. What happens if cdc jobs are missing on new primary, and data is inserted?
