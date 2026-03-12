@@ -102,9 +102,12 @@ select @@servername, * from CDCDemo.cdc.dbo_Employees_CT;
 go
 
 -- Automation: Automatically create CDC Jobs if missing
-declare @sql_create_job nvarchar(max);
+declare @_sql_create_job nvarchar(max);
+declare @_job_name sysname;
+declare @_job_running bit = 0;
+
 declare cursor_cdc_jobs cursor local fast_forward for 
-	select	--j_exp.cdc_job_name, j_exp.job_type, jv.job_id, jv.job_category, [job_exists],
+	select	j_exp.cdc_job_name, --j_exp.job_type, jv.job_id, jv.job_category, [job_exists],
 			[re_create_job] = case when j_exp.job_type = 'capture' then 'use '+quotename(d.name)+'; EXEC sys.sp_cdc_add_job @job_type = N''capture'';'
 									else 'use '+quotename(d.name)+'; EXEC sys.sp_cdc_add_job @job_type = N''cleanup'';'
 									end
@@ -121,13 +124,50 @@ declare cursor_cdc_jobs cursor local fast_forward for
 	--and [job_exists] = 0;
 
 open cursor_cdc_jobs;
-fetch next from cursor_cdc_jobs into @sql_create_job;
+fetch next from cursor_cdc_jobs into @_job_name, @_sql_create_job;
 
 while @@fetch_status = 0
 begin
-	--print @sql_create_job;
-	exec sp_executesql @sql_create_job;
-	fetch next from cursor_cdc_jobs into @sql_create_job;
+	--print @_sql_create_job;
+	begin try
+		exec sp_executesql @_sql_create_job;
+	end try
+	begin catch
+		print 'Error creating job: '+@_job_name+'. Error Message: '+ERROR_MESSAGE();
+	end catch
+
+	begin try
+		exec msdb.dbo.sp_update_job @job_name = @_job_name, @enabled = 1;
+
+		IF EXISTS (
+			SELECT 1
+			FROM msdb.dbo.sysjobactivity ja
+			JOIN msdb.dbo.sysjobs j ON j.job_id = ja.job_id
+			WHERE j.name = @_job_name
+			  AND ja.start_execution_date IS NOT NULL
+			  AND ja.stop_execution_date IS NULL
+		)
+		BEGIN
+			SET @_job_running = 1;
+		END
+
+		IF @_job_running = 1
+		BEGIN
+			PRINT 'Job '+@_job_name+' is already running. Stopping job to start it fresh..';
+			EXEC msdb.dbo.sp_stop_job @job_name = @_job_name;
+		END
+
+		IF @_job_running = 0
+		BEGIN
+			print 'Job '+@_job_name+' is not running. Starting the job..';
+			EXEC msdb.dbo.sp_start_job @job_name = @_job_name;
+		END
+	end try
+	begin catch
+		print 'Error starting job: '+@_job_name+'. Error Message: '+ERROR_MESSAGE();
+	end catch
+
+	fetch next from cursor_cdc_jobs into @_job_name, @_sql_create_job;
 end
 
 close cursor_cdc_jobs;
