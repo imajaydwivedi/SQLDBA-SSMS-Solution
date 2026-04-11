@@ -35,6 +35,9 @@ ryzen9 (Ubuntu Desktop - KVM Hypervisor)
 virsh list --all | grep AgHost-1A
 
 # Check available disk space on the host (need at least 2x VM disk size free)
+sudo mkdir /vm-storage-02/libvirt-images/
+sudo ln -s /vm-storage-02/libvirt-images /var/lib/libvirt/images
+
 df -h /var/lib/libvirt/images/
 df -h /backup/
 
@@ -42,6 +45,42 @@ df -h /backup/
 virsh --version
 virt-host-validate
 ```
+
+Actual output on **ryzen9**:
+```
+  QEMU: Checking for hardware virtualization                                 : PASS
+  QEMU: Checking if device /dev/kvm exists                                   : PASS
+  QEMU: Checking if device /dev/kvm is accessible                            : PASS
+  QEMU: Checking if device /dev/cpu/0/msr exists                             : PASS
+  QEMU: Checking if device /dev/vhost-net exists                             : PASS
+  QEMU: Checking if device /dev/net/tun exists                               : PASS
+  QEMU: Checking for cgroup 'cpu' controller support                         : PASS
+  QEMU: Checking for cgroup 'cpuacct' controller support                     : PASS
+  QEMU: Checking for cgroup 'cpuset' controller support                      : PASS
+  QEMU: Checking for cgroup 'memory' controller support                      : PASS
+  QEMU: Checking for cgroup 'devices' controller support                     : WARN (Enable 'devices' in kernel Kconfig file or mount/enable cgroup controller in your system)
+  QEMU: Checking for device assignment IOMMU support                         : PASS
+  QEMU: Checking if IOMMU is enabled by kernel                               : PASS
+  QEMU: Checking for secure guest support                                    : WARN (Unknown if this platform has Secure Guest support)
+   LXC: Checking for cgroup 'devices' controller support                     : FAIL (Enable 'devices' in kernel Kconfig file or mount/enable cgroup controller in your system)
+   LXC: Checking for cgroup 'freezer' controller support                     : FAIL (Enable 'freezer' in kernel Kconfig file or mount/enable cgroup controller in your system)
+```
+
+#### Interpreting the Results
+
+| Check | Result | Impact on VSS Backup |
+|---|---|---|
+| Hardware virtualization, `/dev/kvm` | ✅ PASS | Core KVM works — VMs can run |
+| IOMMU support + enabled | ✅ PASS | PCI passthrough capable if needed |
+| `vhost-net`, `tun` devices | ✅ PASS | VM networking works |
+| All QEMU cgroups except `devices` | ✅ PASS | CPU/memory/blkio limits work |
+| QEMU cgroup `devices` controller | ⚠️ WARN | Non-critical for VSS backup — only affects device whitelisting within cgroups |
+| Secure Guest support | ⚠️ WARN | Only needed for AMD SEV / Intel TDX confidential VMs — not required here |
+| LXC cgroup `devices` + `freezer` | ❌ FAIL | **LXC containers only** — has no effect on KVM/QEMU VM operation |
+
+> ✅ **Bottom line:** All WARNs and FAILs are **safe to ignore** for this KVM + Windows Server VSS backup setup.
+> The two LXC FAILs are irrelevant since AgHost-1A is a KVM VM, not an LXC container.
+> The QEMU WARNs do not affect `--quiesce`, VSS, or snapshot operations in any way.
 
 ### On the Windows Server VM (AgHost-1A)
 
@@ -92,6 +131,122 @@ D:\guest-agent\qemu-ga-x86_64.msi
 Start-Service QEMU-GA
 Set-Service -Name QEMU-GA -StartupType Automatic
 Get-Service QEMU-GA
+
+& "C:\Program Files\qemu-ga\qemu-ga.exe" -d
+
+PS C:\Users\adwivedi> & "C:\Program Files\qemu-ga\qemu-ga.exe" -d
+1775924364.470023: critical: error opening path
+1775924364.470023: critical: error opening channel
+1775924364.470023: critical: failed to create guest agent channel
+1775924364.471060: critical: failed to initialize guest agent channel
+```
+
+> ⚠️ **If `Start-Service QEMU-GA` fails** with *"Cannot start service QEMU-GA"* and running
+> `qemu-ga.exe -d` shows:
+> ```
+> critical: error opening path
+> critical: error opening channel
+> critical: failed to create guest agent channel
+> critical: failed to initialize guest agent channel
+> ```
+> This means the **VirtIO serial port device is not present in the VM's hardware config on ryzen9**.
+> The guest agent has nothing to connect to. Fix this in **Step 1.2a and 1.2b** below before retrying.
+
+### 1.2a Fix — Add the VirtIO Serial Channel Device on ryzen9 (KVM Host)
+
+The guest agent communicates over a special `virtio-serial` channel. It must be defined in the VM's XML. This is done **on ryzen9 while the VM is shut down**.
+
+```bash
+# On ryzen9 — shut down the VM cleanly first
+virsh shutdown AgHost-1A
+
+# Wait for it to stop
+virsh domstate AgHost-1A   # repeat until output is "shut off"
+```
+
+```bash
+# Open the VM XML editor
+virsh edit AgHost-1A
+```
+
+First, check whether the `virtio-serial` controller already exists in the VM XML:
+
+```bash
+virsh dumpxml AgHost-1A | grep -A2 'virtio-serial'
+```
+
+**Case A — Controller is missing** (nothing returned): add both blocks below.
+
+**Case B — Controller already exists** (e.g. `virt-manager` shows *Controller VirtIO Serial 0* in the left panel): add **only the `<channel>` block** — the controller is already there.
+
+> On AgHost-1A, the controller is already present with `bus="0x03" slot="0x00"`.
+> Only the `<channel>` entry is missing — that is what `qemu-ga.exe` actually tries to open.
+
+```xml
+<!-- Add ONLY if controller is missing -->
+<controller type='virtio-serial' index='0'>
+  <address type='pci' domain='0x0000' bus='0x03' slot='0x00' function='0x0'/>
+</controller>
+
+<!-- Always add this — this is the pipe qemu-ga.exe opens -->
+<channel type='unix'>
+  <target type='virtio' name='org.qemu.guest_agent.0'/>
+  <address type='virtio-serial' controller='0' bus='0' port='2'/>
+</channel>
+```
+
+![Add Unix Channel on KVM VM](../Images/kvm-vm-add-unix-channel.png)
+
+> **Port numbering:** Port `1` on `controller='0'` is already occupied by the `Channel (spice)` device
+> (visible in virt-manager as *Channel (spice)* in the left panel). Use `port='2'` for the guest agent channel.
+> If port 2 is also occupied, increment to `port='3'`, etc.
+>
+> The `<address>` values (`controller='0' bus='0' port='2'`) are VirtIO serial port coordinates —
+> they do **not** need to match the PCI address of the controller above.
+
+Save and exit the editor (`:wq` in vi). Then start the VM:
+
+```bash
+virsh start AgHost-1A
+```
+
+### 1.2b Fix — Install the VirtIO Serial Driver on AgHost-1A (Windows)
+
+The channel device on the host is now present, but Windows also needs the **VirtIO serial (`vioserial`) driver** to expose it as `\\.\Global\org.qemu.guest_agent.0`.
+
+**Option A — Install from the VirtIO ISO (recommended)**
+
+Mount the VirtIO ISO in virt-manager or via virsh, then on AgHost-1A:
+
+```
+1. Open Device Manager
+2. Look for "PCI Simple Communications Controller" with a yellow warning icon
+3. Right-click → Update Driver → Browse my computer
+4. Navigate to:  D:\vioserial\2k22\amd64\   (adjust for your Windows Server version)
+5. Install the driver — the device should now show as "VirtIO Serial Driver"
+```
+
+Windows Server version folder mapping:
+
+| Windows Version | Folder |
+|---|---|
+| Windows Server 2025 | `2k25\amd64` |
+| Windows Server 2022 | `2k22\amd64` |
+| Windows Server 2019 | `2k19\amd64` |
+| Windows Server 2016 | `2k16\amd64` |
+
+**Option B — Silent install from PowerShell on AgHost-1A**
+
+```powershell
+# Mount ISO first via virt-manager, then run on AgHost-1A (adjust drive letter)
+pnputil /add-driver "D:\vioserial\2k22\amd64\vioserial.inf" /install
+```
+
+After the driver installs, retry starting the guest agent:
+
+```powershell
+Start-Service QEMU-GA
+Get-Service QEMU-GA   # should show: Running
 ```
 
 ### 1.3 ✅ Verify Guest Agent from the Host (ryzen9)
