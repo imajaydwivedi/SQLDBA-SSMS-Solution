@@ -2,13 +2,13 @@
 
 ## Overview
 
-This guide walks through performing a **VSS (Volume Shadow Copy Service)** snapshot backup of a SQL Server instance running inside a Windows Server virtual machine (`sqlmonitor`) hosted on a KVM hypervisor (`ryzen9` — Ubuntu Desktop).
+This guide walks through performing a **VSS (Volume Shadow Copy Service)** snapshot backup of a SQL Server instance running inside a Windows Server virtual machine (`AgHost-1A`) hosted on a KVM hypervisor (`ryzen9` — Ubuntu Desktop).
 
 ### Architecture
 
 ```
 ryzen9 (Ubuntu Desktop - KVM Hypervisor)
-  └── sqlmonitor (Windows Server VM - SQL Server)
+  └── AgHost-1A (Windows Server VM - SQL Server)
         └── VSS Snapshot → Backup
 ```
 
@@ -32,7 +32,7 @@ ryzen9 (Ubuntu Desktop - KVM Hypervisor)
 
 ```bash
 # Verify the VM is recognized and running
-virsh list --all | grep sqlmonitor
+virsh list --all | grep AgHost-1A
 
 # Check available disk space on the host (need at least 2x VM disk size free)
 df -h /var/lib/libvirt/images/
@@ -43,7 +43,7 @@ virsh --version
 virt-host-validate
 ```
 
-### On the Windows Server VM (sqlmonitor)
+### On the Windows Server VM (AgHost-1A)
 
 - SQL Server installed and running
 - `qemu-guest-agent` installed (enables host↔guest coordination)
@@ -51,7 +51,7 @@ virt-host-validate
 - Windows VSS service (`VSS`) running
 
 ```powershell
-# Pre-flight: verify all required services are running on sqlmonitor (run as Administrator)
+# Pre-flight: verify all required services are running on AgHost-1A (run as Administrator)
 Get-Service -Name 'MSSQLSERVER','SQLWriter','VSS','QEMU-GA' | Select-Object Name, Status, StartType
 ```
 
@@ -67,11 +67,11 @@ QEMU-GA       Running Automatic
 
 ---
 
-## Step 1 — Install & Verify qemu-guest-agent on sqlmonitor
+## Step 1 — Install & Verify qemu-guest-agent on AgHost-1A
 
 The guest agent is critical — without it, KVM cannot signal VSS before snapshotting.
 
-### 1.1 Download the Guest Agent on sqlmonitor
+### 1.1 Download the Guest Agent on AgHost-1A
 
 On the Windows VM, download the VirtIO drivers ISO which includes the guest agent:
 
@@ -88,7 +88,7 @@ D:\guest-agent\qemu-ga-x86_64.msi
 ### 1.2 Install and Start the Service
 
 ```powershell
-# Run in PowerShell on sqlmonitor (as Administrator)
+# Run in PowerShell on AgHost-1A (as Administrator)
 Start-Service QEMU-GA
 Set-Service -Name QEMU-GA -StartupType Automatic
 Get-Service QEMU-GA
@@ -98,7 +98,7 @@ Get-Service QEMU-GA
 
 ```bash
 # On ryzen9 — check guest agent is responding and get version info
-virsh qemu-agent-command sqlmonitor '{"execute":"guest-info"}' | python3 -m json.tool
+virsh qemu-agent-command AgHost-1A '{"execute":"guest-info"}' | python3 -m json.tool
 ```
 
 Expected: a JSON response with `"version"` and `"supported_commands"` fields.
@@ -106,7 +106,7 @@ If the command hangs or returns an error, the guest agent is not running — ret
 
 ```bash
 # Also verify guest agent channel exists in the VM config
-virsh dumpxml sqlmonitor | grep -A3 'channel'
+virsh dumpxml AgHost-1A | grep -A3 'channel'
 ```
 
 Expected output should include:
@@ -118,10 +118,10 @@ Expected output should include:
 
 ---
 
-## Step 2 — Verify SQL Server VSS Writer on sqlmonitor
+## Step 2 — Verify SQL Server VSS Writer on AgHost-1A
 
 ```powershell
-# Run in PowerShell or CMD on sqlmonitor (as Administrator)
+# Run in PowerShell or CMD on AgHost-1A (as Administrator)
 vssadmin list writers
 ```
 
@@ -171,15 +171,15 @@ Provider name: 'Microsoft Software Shadow Copy provider 1.0'
 ## Step 3 — Identify the VM Disk on the Host (ryzen9)
 
 ```bash
-# Find the disk image path used by sqlmonitor
-virsh domblklist sqlmonitor --details
+# Find the disk image path used by AgHost-1A
+virsh domblklist AgHost-1A --details
 ```
 
 Example output:
 ```
 Type   Device  Target  Source
 ------------------------------------------------
-file   disk    vda     /var/lib/libvirt/images/sqlmonitor.qcow2
+file   disk    vda     /var/lib/libvirt/images/AgHost-1A.qcow2
 ```
 
 Note the **Source** path — this is what will be snapshotted.
@@ -188,14 +188,14 @@ Note the **Source** path — this is what will be snapshotted.
 
 ```bash
 # Confirm the base image is intact and not already on an overlay chain
-BASE_IMAGE="/var/lib/libvirt/images/sqlmonitor.qcow2"
+BASE_IMAGE="/var/lib/libvirt/images/AgHost-1A.qcow2"
 qemu-img info "$BASE_IMAGE"
 qemu-img check "$BASE_IMAGE"
 ```
 
 Expected `qemu-img info` output includes:
 ```
-image: sqlmonitor.qcow2
+image: AgHost-1A.qcow2
 file format: qcow2
 ...
 backing file: <none>       ← must have no backing file (not already an overlay)
@@ -215,8 +215,8 @@ to trigger a VSS freeze inside Windows before taking the snapshot.
 
 ```bash
 # On ryzen9 — create a quiesced (VSS-consistent) external snapshot
-virsh snapshot-create-as sqlmonitor \
-  --name "sqlmonitor-vss-$(date +%Y%m%d-%H%M%S)" \
+virsh snapshot-create-as AgHost-1A \
+  --name "AgHost-1A-vss-$(date +%Y%m%d-%H%M%S)" \
   --description "VSS-consistent SQL Server snapshot" \
   --disk-only \
   --quiesce \
@@ -235,38 +235,38 @@ virsh snapshot-create-as sqlmonitor \
 
 ```bash
 # Confirm snapshot appears in the list
-virsh snapshot-list sqlmonitor
+virsh snapshot-list AgHost-1A
 
 # Confirm active disk is now the overlay (not the original qcow2)
-virsh domblklist sqlmonitor --details
+virsh domblklist AgHost-1A --details
 ```
 
 Expected — Source column should now point to an overlay file:
 ```
 Type   Device  Target  Source
 ---------------------------------------------------------------------
-file   disk    vda     /var/lib/libvirt/images/sqlmonitor.vss-20250411-020001
+file   disk    vda     /var/lib/libvirt/images/AgHost-1A.vss-20250411-020001
 ```
 
 ```bash
 # Verify the overlay file exists and has a backing file pointing to the original
-OVERLAY=$(virsh domblklist sqlmonitor | awk '/vda/ {print $2}')
+OVERLAY=$(virsh domblklist AgHost-1A | awk '/vda/ {print $2}')
 qemu-img info "$OVERLAY"
 ```
 
 Expected `qemu-img info` output confirms the chain:
 ```
-image: sqlmonitor.vss-20250411-020001
+image: AgHost-1A.vss-20250411-020001
 file format: qcow2
-backing file: /var/lib/libvirt/images/sqlmonitor.qcow2
+backing file: /var/lib/libvirt/images/AgHost-1A.qcow2
 ```
 
 ### ✅ Verify VSS Freeze/Thaw Events in Windows Event Log
 
-Immediately after the snapshot, check Windows Event Viewer on `sqlmonitor` to confirm VSS completed cleanly:
+Immediately after the snapshot, check Windows Event Viewer on `AgHost-1A` to confirm VSS completed cleanly:
 
 ```powershell
-# On sqlmonitor — check Application event log for VSS events around snapshot time
+# On AgHost-1A — check Application event log for VSS events around snapshot time
 Get-WinEvent -LogName Application -MaxEvents 50 |
   Where-Object { $_.ProviderName -match 'VSS|SQLWriter|SQLWRITER' } |
   Select-Object TimeCreated, Id, LevelDisplayName, Message |
@@ -292,22 +292,22 @@ a point-in-time consistent image of SQL Server. Back it up:
 
 ```bash
 SNAP_DATE=$(date +%Y%m%d-%H%M%S)
-BACKUP_DIR="/backup/sqlmonitor"
+BACKUP_DIR="/backup/AgHost-1A"
 mkdir -p "$BACKUP_DIR"
 
 # The base disk is the original qcow2 before the overlay was created
-cp /var/lib/libvirt/images/sqlmonitor.qcow2 "$BACKUP_DIR/sqlmonitor-base-$SNAP_DATE.qcow2"
+cp /var/lib/libvirt/images/AgHost-1A.qcow2 "$BACKUP_DIR/AgHost-1A-base-$SNAP_DATE.qcow2"
 
 # Optional: compress it
 qemu-img convert -O qcow2 -c \
-  /var/lib/libvirt/images/sqlmonitor.qcow2 \
-  "$BACKUP_DIR/sqlmonitor-$SNAP_DATE-compressed.qcow2"
+  /var/lib/libvirt/images/AgHost-1A.qcow2 \
+  "$BACKUP_DIR/AgHost-1A-$SNAP_DATE-compressed.qcow2"
 ```
 
 ### ✅ Validate the Backup File Integrity
 
 ```bash
-BACKUP_FILE="$BACKUP_DIR/sqlmonitor-base-$SNAP_DATE.qcow2"
+BACKUP_FILE="$BACKUP_DIR/AgHost-1A-base-$SNAP_DATE.qcow2"
 
 # Check file was written and is non-zero
 ls -lh "$BACKUP_FILE"
@@ -324,7 +324,7 @@ Image end offset: XXXXXXX
 
 ```bash
 # Cross-check: backup file size should be close to (or larger than) the source
-du -sh /var/lib/libvirt/images/sqlmonitor.qcow2
+du -sh /var/lib/libvirt/images/AgHost-1A.qcow2
 du -sh "$BACKUP_FILE"
 ```
 
@@ -336,11 +336,11 @@ After backup, merge the overlay back into the base image so the VM stays healthy
 
 ```bash
 # Blockcommit merges the overlay back into the base and pivots the active disk
-virsh blockcommit sqlmonitor vda --active --verbose --pivot
+virsh blockcommit AgHost-1A vda --active --verbose --pivot
 
 # Delete the snapshot metadata
 SNAP_NAME="<snapshot-name>"   # use name from Step 4
-virsh snapshot-delete sqlmonitor --snapshotname "$SNAP_NAME" --metadata
+virsh snapshot-delete AgHost-1A --snapshotname "$SNAP_NAME" --metadata
 ```
 
 > ⚠️ **Do not** leave the VM running on the overlay file long-term.
@@ -350,24 +350,24 @@ virsh snapshot-delete sqlmonitor --snapshotname "$SNAP_NAME" --metadata
 
 ```bash
 # Source must point back to the original .qcow2, not an overlay
-virsh domblklist sqlmonitor --details
+virsh domblklist AgHost-1A --details
 ```
 
 Expected — Source column reverts to the original path:
 ```
 Type   Device  Target  Source
 ------------------------------------------------
-file   disk    vda     /var/lib/libvirt/images/sqlmonitor.qcow2
+file   disk    vda     /var/lib/libvirt/images/AgHost-1A.qcow2
 ```
 
 ```bash
 # Confirm no backing file (overlay chain is fully collapsed)
-qemu-img info /var/lib/libvirt/images/sqlmonitor.qcow2 | grep -E 'backing|format|image'
+qemu-img info /var/lib/libvirt/images/AgHost-1A.qcow2 | grep -E 'backing|format|image'
 ```
 
 Expected:
 ```
-image: sqlmonitor.qcow2
+image: AgHost-1A.qcow2
 file format: qcow2
 backing file: <none>       ← overlay fully merged
 ```
@@ -375,7 +375,7 @@ backing file: <none>       ← overlay fully merged
 ### ✅ Verify SQL Server Is Healthy After Thaw
 
 ```powershell
-# On sqlmonitor — confirm SQL Server is running and accessible
+# On AgHost-1A — confirm SQL Server is running and accessible
 Invoke-Sqlcmd -Query "SELECT @@SERVERNAME AS ServerName, GETDATE() AS CurrentTime, @@VERSION AS Version"
 
 # Check all databases are ONLINE
@@ -397,7 +397,7 @@ All user databases should show `state_desc = ONLINE`. If any show `SUSPECT` or `
 sudo modprobe nbd max_part=8
 
 # Attach the backup qcow2 as a block device
-sudo qemu-nbd --connect=/dev/nbd0 /backup/sqlmonitor/sqlmonitor-base-<date>.qcow2
+sudo qemu-nbd --connect=/dev/nbd0 /backup/AgHost-1A/AgHost-1A-base-<date>.qcow2
 
 # List partitions inside the image
 sudo fdisk -l /dev/nbd0
@@ -407,11 +407,11 @@ sudo fdisk -l /dev/nbd0
 
 ```bash
 # Windows Server typically places data on partition 3 or 4 — check fdisk output first
-sudo mkdir -p /mnt/sqlmonitor-backup
-sudo mount -o ro,offset=... /dev/nbd0p3 /mnt/sqlmonitor-backup
+sudo mkdir -p /mnt/AgHost-1A-backup
+sudo mount -o ro,offset=... /dev/nbd0p3 /mnt/AgHost-1A-backup
 
 # Confirm SQL Server data files are present
-ls -lh "/mnt/sqlmonitor-backup/Program Files/Microsoft SQL Server/"
+ls -lh "/mnt/AgHost-1A-backup/Program Files/Microsoft SQL Server/"
 ```
 
 ### 7.3 ✅ Verify SQL Data File Consistency Using sqlcmd (Optional — Requires Attach)
@@ -437,7 +437,7 @@ GO
 
 ```bash
 # Unmount and disconnect
-sudo umount /mnt/sqlmonitor-backup
+sudo umount /mnt/AgHost-1A-backup
 sudo qemu-nbd --disconnect /dev/nbd0
 ```
 
@@ -445,17 +445,17 @@ sudo qemu-nbd --disconnect /dev/nbd0
 
 ## Automation Script (ryzen9)
 
-Save as `/usr/local/bin/sqlmonitor-vss-backup.sh`:
+Save as `/usr/local/bin/AgHost-1A-vss-backup.sh`:
 
 ```bash
 #!/bin/bash
 set -euo pipefail
 
-VM_NAME="sqlmonitor"
-BACKUP_DIR="/backup/sqlmonitor"
+VM_NAME="AgHost-1A"
+BACKUP_DIR="/backup/AgHost-1A"
 SNAP_NAME="${VM_NAME}-vss-$(date +%Y%m%d-%H%M%S)"
 DISK_TARGET="vda"
-BASE_IMAGE="/var/lib/libvirt/images/sqlmonitor.qcow2"
+BASE_IMAGE="/var/lib/libvirt/images/AgHost-1A.qcow2"
 
 mkdir -p "$BACKUP_DIR"
 
@@ -513,14 +513,14 @@ echo "✅ Backup complete: $BACKUP_DIR/${SNAP_NAME}.qcow2"
 ```
 
 ```bash
-chmod +x /usr/local/bin/sqlmonitor-vss-backup.sh
+chmod +x /usr/local/bin/AgHost-1A-vss-backup.sh
 ```
 
 Schedule with cron (daily at 2 AM):
 
 ```bash
-echo "0 2 * * * root /usr/local/bin/sqlmonitor-vss-backup.sh >> /var/log/sqlmonitor-backup.log 2>&1" \
-  | sudo tee /etc/cron.d/sqlmonitor-vss-backup
+echo "0 2 * * * root /usr/local/bin/AgHost-1A-vss-backup.sh >> /var/log/AgHost-1A-backup.log 2>&1" \
+  | sudo tee /etc/cron.d/AgHost-1A-vss-backup
 ```
 
 ---
@@ -530,33 +530,33 @@ echo "0 2 * * * root /usr/local/bin/sqlmonitor-vss-backup.sh >> /var/log/sqlmoni
 Use this as a go/no-go checklist at each stage of the process:
 
 ### Before Taking the Snapshot (Pre-flight)
-- [ ] `virsh list --all` shows `sqlmonitor` in **running** state
-- [ ] `virsh qemu-agent-command sqlmonitor '{"execute":"guest-info"}'` returns a JSON response
-- [ ] `Get-Service QEMU-GA` on sqlmonitor shows **Running**
+- [ ] `virsh list --all` shows `AgHost-1A` in **running** state
+- [ ] `virsh qemu-agent-command AgHost-1A '{"execute":"guest-info"}'` returns a JSON response
+- [ ] `Get-Service QEMU-GA` on AgHost-1A shows **Running**
 - [ ] `vssadmin list writers` shows `SqlServerWriter` in **Stable** state with **No error**
 - [ ] `vssadmin list providers` shows the Microsoft Software Shadow Copy provider
-- [ ] `qemu-img check sqlmonitor.qcow2` reports **No errors**
+- [ ] `qemu-img check AgHost-1A.qcow2` reports **No errors**
 - [ ] Host has sufficient free disk space (`df -h /var/lib/libvirt/images/`)
 - [ ] No active overlay/snapshot chain (`qemu-img info` shows no backing file)
 
 ### After Taking the Snapshot
-- [ ] `virsh snapshot-list sqlmonitor` shows the new snapshot entry
-- [ ] `virsh domblklist sqlmonitor` Source column points to an **overlay** file
+- [ ] `virsh snapshot-list AgHost-1A` shows the new snapshot entry
+- [ ] `virsh domblklist AgHost-1A` Source column points to an **overlay** file
 - [ ] `qemu-img info <overlay>` shows correct **backing file** path
-- [ ] Windows Event Viewer on `sqlmonitor` shows VSS events with **no errors** (Event IDs 8229, 8230)
+- [ ] Windows Event Viewer on `AgHost-1A` shows VSS events with **no errors** (Event IDs 8229, 8230)
 - [ ] SQL Server is accessible after thaw — `SELECT @@SERVERNAME` returns a result
 - [ ] All databases show `state_desc = ONLINE` in `sys.databases`
 
 ### After Backup Copy
-- [ ] Backup file exists and is non-zero: `ls -lh /backup/sqlmonitor/`
+- [ ] Backup file exists and is non-zero: `ls -lh /backup/AgHost-1A/`
 - [ ] `qemu-img check <backup.qcow2>` reports **No errors**
 - [ ] Backup file size is reasonable compared to the source disk
 
 ### After Blockcommit & Cleanup
-- [ ] `virsh domblklist sqlmonitor` Source column is back to the **original `.qcow2`**
-- [ ] `qemu-img info sqlmonitor.qcow2` shows **no backing file** (overlay fully merged)
-- [ ] `qemu-img check sqlmonitor.qcow2` reports **No errors** on the live disk
-- [ ] `virsh snapshot-list sqlmonitor` shows no leftover snapshot entries
+- [ ] `virsh domblklist AgHost-1A` Source column is back to the **original `.qcow2`**
+- [ ] `qemu-img info AgHost-1A.qcow2` shows **no backing file** (overlay fully merged)
+- [ ] `qemu-img check AgHost-1A.qcow2` reports **No errors** on the live disk
+- [ ] `virsh snapshot-list AgHost-1A` shows no leftover snapshot entries
 
 ### Restore Test (Periodic — Recommended Monthly)
 - [ ] Backup `.qcow2` mounts successfully via `qemu-nbd`
@@ -569,10 +569,10 @@ Use this as a go/no-go checklist at each stage of the process:
 
 | Problem | Cause | Fix |
 |---|---|---|
-| `--quiesce` fails with "unsupported" | Guest agent not running | Install/start `QEMU-GA` on sqlmonitor |
+| `--quiesce` fails with "unsupported" | Guest agent not running | Install/start `QEMU-GA` on AgHost-1A |
 | `vssadmin list writers` shows SqlServerWriter as failed | SQL Writer service stopped | `net stop/start SQLWriter` |
 | Snapshot created but data inconsistent | VSS freeze timed out | Check Windows Event Viewer → Application log for VSS errors |
-| `blockcommit` fails | Overlay disk not found | Run `virsh domblklist sqlmonitor` to confirm overlay path |
+| `blockcommit` fails | Overlay disk not found | Run `virsh domblklist AgHost-1A` to confirm overlay path |
 | Mount shows NTFS errors | Snapshot taken without quiesce | Repeat with `--quiesce` enabled |
 | `qemu-img check` fails on backup | I/O error during copy | Retry copy; check host disk health with `smartctl` |
 | SQL databases in SUSPECT after thaw | VSS freeze/thaw interrupted | Run `DBCC CHECKDB` immediately; restore from backup if needed |
