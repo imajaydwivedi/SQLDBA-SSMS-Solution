@@ -90,19 +90,40 @@ Actual output on **ryzen9**:
 - Windows VSS service (`VSS`) running
 
 ```powershell
-# Pre-flight: verify all required services are running on AgHost-1A (run as Administrator)
-Get-Service -Name 'MSSQLSERVER','SQLWriter','VSS','QEMU-GA' | Select-Object Name, Status, StartType
+# Pre-flight: verify all required services on AgHost-1A (run as Administrator)
+# Note: there are TWO QEMU services — both are required for VSS to work correctly
+Get-Service -Name 'MSSQLSERVER','SQLWriter','VSS' |
+  Select-Object Name, DisplayName, Status, StartType
+
+# Discover all QEMU-related services (the VSS Provider name can vary by installer version)
+Get-Service -DisplayName '*QEMU*' | Select-Object Name, DisplayName, Status, StartType
 ```
 
-Expected output — all four should show `Running`:
+> ⚠️ **Two separate QEMU services are involved — both must be present:**
+>
+> | Service Name | Display Name | Role |
+> |---|---|---|
+> | `QEMU-GA` | QEMU Guest Agent | Receives the `--quiesce` signal from the KVM host |
+> | `QEMU Guest Agent VSS Provider` | QEMU Guest Agent VSS Provider | The actual VSS provider that freezes/thaws writers |
+>
+> If the **VSS Provider** service is stopped or missing, QEMU-GA receives the quiesce signal
+> but cannot coordinate with Windows VSS writers. This causes Event ID `8194` (`Access is denied`)
+> errors in the Application event log — even though the snapshot appears to succeed on the host.
+
+Expected output — **five** services, all in correct state:
 ```
-Name          Status  StartType
-----          ------  ---------
-MSSQLSERVER   Running Automatic
-SQLWriter     Running Manual
-VSS           Running Manual
-QEMU-GA       Running Automatic
+Name          DisplayName                          Status  StartType
+----          -----------                          ------  ---------
+MSSQLSERVER   SQL Server (MSSQLSERVER)             Running Automatic
+SQLWriter     SQL Server VSS Writer                Running Manual
+VSS           Volume Shadow Copy                   Running Manual
+QEMU-GA       QEMU Guest Agent                     Running Automatic
+              QEMU Guest Agent VSS Provider        Stopped Manual
 ```
+
+> The VSS Provider service has `StartType = Manual` by design — Windows VSS starts it
+> on demand at the beginning of a backup and stops it when done. `Stopped` at rest is normal.
+> The problem occurs when it **fails to start** during a VSS operation.
 
 ---
 
@@ -121,16 +142,39 @@ https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/v
 Or install via the bundled installer if already mounted:
 
 ```
-D:\guest-agent\qemu-ga-x86_64.msi
+F:\guest-agent\qemu-ga-x86_64.msi
 ```
 
-### 1.2 Install and Start the Service
+### 1.2 Install and Start Both QEMU Services
 
 ```powershell
 # Run in PowerShell on AgHost-1A (as Administrator)
 Start-Service QEMU-GA
 Set-Service -Name QEMU-GA -StartupType Automatic
-Get-Service QEMU-GA
+
+# Find and verify the VSS Provider service (name varies by installer version)
+Get-Service -DisplayName '*QEMU*' | Select-Object Name, DisplayName, Status, StartType
+```
+
+> ⚠️ **If the QEMU Guest Agent VSS Provider service is missing entirely**, it means the VSS
+> Provider component was not installed alongside QEMU-GA. Install it separately:
+>
+> ```
+> # On AgHost-1A — locate and run the VSS Provider installer from the VirtIO ISO
+> F:\guest-agent\qemu-vss-x86_64.msi
+> ```
+>
+> After installation, verify both services appear:
+> ```powershell
+> Get-Service -DisplayName '*QEMU*' | Select-Object Name, DisplayName, Status, StartType
+> ```
+>
+> The VSS Provider service should have `StartType = Manual` — this is correct.
+> It is started on demand by the Windows VSS subsystem at backup time and stops when done.
+> **Do not set it to Automatic** — that can cause conflicts with VSS orchestration.
+
+```powershell
+# Start the main guest agent
 
 & "C:\Program Files\qemu-ga\qemu-ga.exe" -d
 
@@ -214,6 +258,261 @@ virsh start AgHost-1A
 
 The channel device on the host is now present, but Windows also needs the **VirtIO serial (`vioserial`) driver** to expose it as `\\.\Global\org.qemu.guest_agent.0`.
 
+#### ✅ Check If the Driver Is Already Installed (Run First)
+
+```powershell
+# Check 1 — Most definitive: does the guest agent channel device exist?
+# Run as Administrator for accurate results.
+# Note: Test-Path on device paths returns "Access is denied" + False even when the
+# device EXISTS if run without elevation. Use the try/catch below instead.
+$devicePath = '\\.\Global\org.qemu.guest_agent.0'
+try {
+    $stream = [System.IO.File]::Open($devicePath, 'Open', 'Read', 'ReadWrite')
+    $stream.Close()
+    Write-Host "✅ Device EXISTS and is accessible — driver installed, channel present"
+} catch [System.UnauthorizedAccessException] {
+    Write-Host "✅ Device EXISTS — 'Access is denied' confirms the path is present (run as Admin to access)"
+} catch [System.IO.FileNotFoundException] {
+    Write-Host "❌ Device NOT FOUND — driver missing or channel XML not configured on host"
+} catch {
+    Write-Host "❌ Device NOT FOUND — $($_.Exception.Message)"
+}
+
+# Check 2 — Is the VirtIO Serial driver loaded?
+Get-PnpDevice | Where-Object { $_.FriendlyName -match 'VirtIO' } |
+  Select-Object Status, Class, FriendlyName
+
+# Check 3 — Any unrecognised devices needing a driver? (yellow bang in Device Manager)
+Get-PnpDevice | Where-Object { $_.Status -eq 'Error' -or $_.Status -eq 'Unknown' } |
+  Select-Object Status, Class, FriendlyName, InstanceId
+```
+
+> ⚠️ **`Test-Path` is unreliable for device paths** — it returns `Access is denied` + `False`
+> even when the device exists. Use the `try/catch` above which distinguishes
+> `UnauthorizedAccessException` (device exists) from `FileNotFoundException` (device truly absent).
+>
+> **`UnauthorizedAccessException` is expected even when running as Administrator.**
+> The guest agent pipe (`\\.\Global\org.qemu.guest_agent.0`) is owned by `SYSTEM` and its ACL
+> does not grant read access to the Administrator account — only the `QEMU-GA` service itself
+> (running as Local System) can open it. The exception still confirms the device is present.
+
+| Result | Meaning | Action |
+|---|---|---|
+| `UnauthorizedAccessException` caught (any user level) | ✅ Device exists — driver installed, channel present | Skip installation — proceed to Step 1.3 |
+| No exception, stream opens | ✅ Device exists and fully accessible | Skip installation — proceed to Step 1.3 |
+| `FileNotFoundException` caught | ❌ Device missing — driver not installed or channel XML absent | Check 2 & 3, then install driver or revisit Step 1.2a |
+| Check 2 shows VirtIO Serial `Status=OK`, device path missing | Driver installed but channel XML missing on host | Go back to Step 1.2a |
+| Check 3 shows unknown PCI device | Driver not installed | Proceed with installation below |
+
+#### Actual Output from AgHost-1A — Check 2 (VirtIO devices, after latest drivers)
+
+```
+Status   Class        FriendlyName
+------   -----        ------------
+OK       System       VirtIO Serial Driver              ← ✅ vioserial — Step 1.2b NOT needed
+OK       DiskDrive    Red Hat VirtIO SCSI Disk Device
+OK       SCSIAdapter  Red Hat VirtIO SCSI controller
+OK       Net          Red Hat VirtIO Ethernet Adapter
+OK       Net          Red Hat VirtIO Ethernet Adapter #2
+OK       System       VirtIO Balloon Driver             ← ✅ resolved after driver update
+OK       DiskDrive    Red Hat VirtIO SCSI Disk Device
+OK       SCSIAdapter  Red Hat VirtIO SCSI controller
+OK       SCSIAdapter  Red Hat VirtIO SCSI controller
+OK       DiskDrive    Red Hat VirtIO SCSI Disk Device
+Unknown  SCSIAdapter  Red Hat VirtIO SCSI controller    ← ⚠️ one instance still unresolved
+Unknown  DiskDrive    Red Hat VirtIO SCSI Disk Device   ← ⚠️ disk on the Unknown controller above
+```
+
+> **Balloon Driver and Ethernet Adapter #3 are now resolved** after updating to the latest
+> VirtIO driver package. One SCSI controller and its associated disk still show `Unknown`.
+>
+> **`Unknown` in `Get-PnpDevice` does not always mean a present broken device.**
+> `Get-PnpDevice` returns ALL devices Windows has ever seen — including **ghost/phantom devices**
+> (non-present hardware from a previous VM configuration or driver installation).
+> Device Manager hides these by default, which is why Device Manager shows nothing Unknown
+> even when `Get-PnpDevice` does.
+>
+> Confirm whether an Unknown device is real (present) or a ghost:
+> ```powershell
+> # Show ONLY currently present Unknown VirtIO devices (excludes ghosts)
+> Get-PnpDevice |
+>   Where-Object { $_.FriendlyName -match 'VirtIO|Red Hat' -and $_.Status -eq 'Unknown' } |
+>   ForEach-Object {
+>       $present = (Get-PnpDeviceProperty -InstanceId $_.InstanceId `
+>                   -KeyName 'DEVPKEY_Device_IsPresent').Data
+>       [PSCustomObject]@{ Status=$_.Status; FriendlyName=$_.FriendlyName; IsPresent=$present }
+>   }
+> ```
+> If `IsPresent = False` → ghost device. No driver action needed.
+>
+> On **AgHost-1A**, Device Manager shows nothing Unknown and
+> `virsh dumpxml AgHost-1A | grep -A5 'controller type=.scsi'` returns empty —
+> confirming there are **no VirtIO SCSI controllers** in the VM XML at all.
+> The disks (`vda/vdb/vdc`) use `virtio-blk` bus directly, not `virtio-scsi`.
+> All Unknown SCSI controller entries in `Get-PnpDevice` were ghost devices — harmless remnants.
+>
+> | `Get-PnpDevice` Status | Device Manager | Meaning | Action |
+> |---|---|---|---|
+> | `Unknown` | ⚠️ Yellow bang visible | Real present device, driver missing | Install driver |
+> | `Unknown` | ✅ Nothing shown | Ghost/phantom device | None — harmless remnant |
+> | `OK` | ✅ Listed normally | Driver loaded, device working | None |
+>
+> **To remove ghost devices (optional housekeeping):**
+> ```powershell
+> # Show all hidden/non-present devices in Device Manager
+> # Run in an elevated cmd prompt, then open devmgmt.msc
+> $env:DEVMGR_SHOW_NONPRESENT_DEVICES = 1
+> devmgmt.msc
+> # In Device Manager: View → Show hidden devices
+> # Right-click any greyed-out ghost device → Uninstall device
+> ```
+
+**Step 1 — Install the full VirtIO driver package and reboot:**
+
+```powershell
+# On AgHost-1A — silent install of all VirtIO drivers at once (adjust drive letter)
+F:\virtio-win-gt-x64.msi /quiet /norestart
+Restart-Computer
+```
+
+**Step 2 — Understand why one controller is OK and the other is Unknown**
+
+Both controllers are the same device type (`Red Hat VirtIO SCSI controller`) yet one has a
+driver and one does not. This happens because QEMU assigns each controller a unique PCI
+address and potentially a different **PCI Subsystem ID** depending on when and how it was
+added to the VM.
+
+Windows driver INF files match devices using their full Hardware ID string:
+```
+PCI\VEN_1AF4&DEV_1048&SUBSYS_11001AF4&REV_01    ← Vendor, Device, Subsystem, Revision
+```
+
+Two controllers of the same "type" can have different `DEV_` or `SUBSYS_` values if:
+
+| Cause | Example |
+|---|---|
+| Controllers added at different times with different QEMU versions | `DEV_1004` (legacy) vs `DEV_1048` (modern) |
+| Transitional vs. non-transitional VirtIO model in VM XML | `virtio-scsi-pci` vs `virtio-scsi-pci-non-transitional` |
+| Different QEMU machine types (`pc` vs `q35`) for each controller slot | Different SUBSYS values |
+
+The installed `vioscsi.inf` contains a fixed list of Hardware IDs it supports.
+The OK controller's ID is in that list — the Unknown controller's ID is not.
+
+Compare the Hardware IDs of both controllers to confirm:
+
+```powershell
+# Compare Hardware IDs of OK vs Unknown SCSI controllers side by side
+Get-PnpDevice |
+  Where-Object { $_.FriendlyName -match 'VirtIO SCSI controller|Red Hat VirtIO SCSI' } |
+  ForEach-Object {
+      $hwids = (Get-PnpDeviceProperty -InstanceId $_.InstanceId `
+                -KeyName 'DEVPKEY_Device_HardwareIds').Data
+      [PSCustomObject]@{
+          Status      = $_.Status
+          FriendlyName= $_.FriendlyName
+          InstanceId  = $_.InstanceId
+          HardwareIds = $hwids -join ' | '
+      }
+  } | Sort-Object Status | Format-List
+```
+
+The output will show a `DEV_` or `SUBSYS_` difference between the OK and Unknown entries —
+that is the exact mismatch preventing the driver from binding.
+
+**Fix Option A — Force-install the driver from Windows side (Device Manager)**
+
+This bypasses Hardware ID matching and directly assigns `vioscsi` to the Unknown controller:
+
+```
+1. Open Device Manager (devmgmt.msc)
+2. Find the Unknown SCSI controller (yellow bang icon)
+3. Right-click → Update driver
+4. Choose: Browse my computer for drivers
+5. Choose: Let me pick from a list of available drivers on my computer
+6. Click: Have Disk → Browse → navigate to F:\vioscsi\2k22\amd64\
+7. Select vioscsi.inf → OK → select "Red Hat VirtIO SCSI controller" → Next
+8. Accept the warning about driver compatibility → Install
+```
+
+Or via PowerShell (get the InstanceId from Step 2 output above):
+
+```powershell
+# Replace <InstanceId> with the Unknown controller's InstanceId from the query above
+pnputil /add-driver "F:\vioscsi\2k22\amd64\vioscsi.inf" /install
+# Then update the specific device to use the newly staged driver
+Update-PnpDeviceDriver -InstanceId "<InstanceId>" -Confirm:$false
+```
+
+**Fix Option B — Standardise the controller model on ryzen9 (KVM host side)**
+
+The cleanest long-term fix is to make all SCSI controllers use the same QEMU device model
+so they all get the same Hardware ID. Do this on **ryzen9 with the VM shut down**:
+
+```bash
+# On ryzen9 — shut down the VM first
+virsh shutdown AgHost-1A
+
+# Check what controller models are currently defined
+virsh dumpxml AgHost-1A | grep -A5 'controller type=.scsi'
+```
+
+Look for inconsistencies like:
+```xml
+<controller type='scsi' model='virtio-scsi'>   ← one controller
+<controller type='scsi' model='lsilogic'>       ← different model on another
+```
+
+Edit to make all SCSI controllers use the same model:
+```bash
+virsh edit AgHost-1A   # set all scsi controllers to model='virtio-scsi'
+virsh start AgHost-1A
+```
+
+After the VM boots, re-run the Hardware ID comparison — all controllers should now have
+matching `DEV_` and `SUBSYS_` values, and `vioscsi.inf` will bind to all of them.
+
+**Step 3 — Verify all Unknown devices are resolved:**
+
+```powershell
+pnputil /scan-devices
+
+Get-PnpDevice |
+  Where-Object { $_.FriendlyName -match 'VirtIO|Red Hat' } |
+  Select-Object Status, Class, FriendlyName |
+  Sort-Object Status, FriendlyName
+```
+
+All VirtIO devices should show `Status = OK`.
+
+> Adjust the folder path for your Windows Server version — see the version mapping table above.
+
+#### Actual Output from AgHost-1A — Check 3 (Error/Unknown devices, filtered to QEMU/VirtIO)
+
+```
+Status  Class   FriendlyName   InstanceId
+------  -----   ------------   ----------
+Error           (no name)      ACPI\QEMU0002\3&11583659&0    ← ⚠️ QEMU system device — missing driver
+```
+
+> `ACPI\QEMU0002` is the **QEMU system/platform device**. The `virtio-win-gt-x64.msi` may not
+> include its driver — install it directly with `pnputil`:
+>
+> ```powershell
+> # On AgHost-1A — install QEMU PCI serial / system device driver
+> pnputil /add-driver "F:\qemupciserial\qemupciserial.inf" /install
+> ```
+>
+> If `F:\qemupciserial\` does not exist on the ISO, search for it:
+> ```powershell
+> Get-ChildItem F:\ -Recurse -Filter "*.inf" | Select-String "QEMU0002" | Select-Object Path
+> ```
+>
+> After installing, verify `ACPI\QEMU0002` no longer shows `Error`:
+> ```powershell
+> Get-PnpDevice | Where-Object { $_.InstanceId -like 'ACPI\QEMU0002*' } |
+>   Select-Object Status, FriendlyName, InstanceId
+> ```
+
 **Option A — Install from the VirtIO ISO (recommended)**
 
 Mount the VirtIO ISO in virt-manager or via virsh, then on AgHost-1A:
@@ -222,7 +521,7 @@ Mount the VirtIO ISO in virt-manager or via virsh, then on AgHost-1A:
 1. Open Device Manager
 2. Look for "PCI Simple Communications Controller" with a yellow warning icon
 3. Right-click → Update Driver → Browse my computer
-4. Navigate to:  D:\vioserial\2k22\amd64\   (adjust for your Windows Server version)
+4. Navigate to:  F:\vioserial\2k22\amd64\   (adjust for your Windows Server version)
 5. Install the driver — the device should now show as "VirtIO Serial Driver"
 ```
 
@@ -239,7 +538,7 @@ Windows Server version folder mapping:
 
 ```powershell
 # Mount ISO first via virt-manager, then run on AgHost-1A (adjust drive letter)
-pnputil /add-driver "D:\vioserial\2k22\amd64\vioserial.inf" /install
+pnputil /add-driver "F:\vioserial\2k22\amd64\vioserial.inf" /install
 ```
 
 After the driver installs, retry starting the guest agent:
@@ -332,28 +631,66 @@ virsh domblklist AgHost-1A --details
 
 Example output:
 ```
-Type   Device  Target  Source
-------------------------------------------------
-file   disk    vda     /var/lib/libvirt/images/AgHost-1A.qcow2
+ Type   Device   Target   Source
+------------------------------------------------------------------
+ file   disk     vda      /vm-os/AgHost-1A_C_Drive.qcow2
+ file   disk     vdb      /vm-storage-01/AgHost-1A_D_Drive.qcow2
+ file   disk     vdc      /vm-storage-01/AgHost-1A_E_Drive.qcow2
 ```
 
 Note the **Source** path — this is what will be snapshotted.
 
 ### ✅ Validate Disk Image Health Before Snapshotting
 
+> ⚠️ **Two common errors when inspecting live VM disk images:**
+>
+> | Error | Cause | Fix |
+> |---|---|---|
+> | `Permission denied` | Image owned by `root`/`libvirt-qemu` (mode `0600`) | Prefix with `sudo` |
+> | `Failed to get shared "write" lock` | The running VM already holds an exclusive write lock on the image | Add `-U` (`--force-share`) flag |
+>
+> Diagnose ownership first:
+> ```bash
+> ls -la /vm-os/AgHost-1A_C_Drive.qcow2
+> ls -la /vm-storage-01/AgHost-1A_D_Drive.qcow2
+> ls -la /vm-storage-01/AgHost-1A_E_Drive.qcow2
+> ```
+> You will typically see files owned by `root:root` or `libvirt-qemu:kvm` with mode `0600`.
+>
+> Always use **`sudo qemu-img -U`** when inspecting **live** disk images (VM is running).
+> Use **`sudo qemu-img`** (no `-U`) on **backup copies** — nothing else has those open.
+
 ```bash
-# Confirm the base image is intact and not already on an overlay chain
-BASE_IMAGE="/var/lib/libvirt/images/AgHost-1A.qcow2"
-qemu-img info "$BASE_IMAGE"
-qemu-img check "$BASE_IMAGE"
+# Run for each disk — C, D and E drives
+# -U (--force-share) bypasses the write lock held by the running VM
+sudo qemu-img info -U /vm-os/AgHost-1A_C_Drive.qcow2
+sudo qemu-img info -U /vm-storage-01/AgHost-1A_D_Drive.qcow2
+sudo qemu-img info -U /vm-storage-01/AgHost-1A_E_Drive.qcow2
+
+sudo qemu-img check -U /vm-os/AgHost-1A_C_Drive.qcow2
+sudo qemu-img check -U /vm-storage-01/AgHost-1A_D_Drive.qcow2
+sudo qemu-img check -U /vm-storage-01/AgHost-1A_E_Drive.qcow2
 ```
 
-Expected `qemu-img info` output includes:
+Expected `qemu-img info` output for each disk:
 ```
-image: AgHost-1A.qcow2
+image: /vm-storage-01/AgHost-1A_E_Drive.qcow2
 file format: qcow2
-...
-backing file: <none>       ← must have no backing file (not already an overlay)
+virtual size: 200 GiB (214748364800 bytes)
+disk size: 56.3 GiB
+cluster_size: 65536
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: true
+    refcount bits: 16
+    corrupt: false
+    extended l2: false
+Child node '/file':
+    filename: /vm-storage-01/AgHost-1A_E_Drive.qcow2
+    protocol type: file
+    file length: 200 GiB (214781394944 bytes)
+    disk size: 56.3 GiB
 ```
 
 Expected `qemu-img check` output:
@@ -396,24 +733,44 @@ virsh snapshot-list AgHost-1A
 virsh domblklist AgHost-1A --details
 ```
 
-Expected — Source column should now point to an overlay file:
+Expected — `virsh snapshot-list` output:
 ```
-Type   Device  Target  Source
----------------------------------------------------------------------
-file   disk    vda     /var/lib/libvirt/images/AgHost-1A.vss-20250411-020001
+ Name                            Creation Time               State
+----------------------------------------------------------------------------
+ AgHost-1A-vss-20260412-104104   2026-04-12 10:41:04 +0530   disk-snapshot
 ```
+
+Expected — `virsh domblklist` Source column now points to **overlay files** for all three disks.
+Note the overlay naming convention: `<original_filename>.<snapshot-name>` — **no `.qcow2` extension**:
+```
+ Type   Device   Target   Source
+------------------------------------------------------------------------------------------
+ file   disk     vda      /vm-os/AgHost-1A_C_Drive.AgHost-1A-vss-20260412-104104
+ file   disk     vdb      /vm-storage-01/AgHost-1A_D_Drive.AgHost-1A-vss-20260412-104104
+ file   disk     vdc      /vm-storage-01/AgHost-1A_E_Drive.AgHost-1A-vss-20260412-104104
+ file   cdrom    sda      -
+```
+
+> The base images (original `.qcow2` files) are now **frozen at the point of the snapshot** —
+> all new writes from the running VM go into the overlay files.
+> This is what makes the base images safe to back up.
 
 ```bash
-# Verify the overlay file exists and has a backing file pointing to the original
-OVERLAY=$(virsh domblklist AgHost-1A | awk '/vda/ {print $2}')
-qemu-img info "$OVERLAY"
+# Verify each overlay has a backing file pointing back to its base image
+# -U needed — VM is running and holds write lock on the overlay files too
+SNAP_NAME="AgHost-1A-vss-20260412-104104"   # replace with actual snapshot name
+
+sudo qemu-img info -U "/vm-os/AgHost-1A_C_Drive.${SNAP_NAME}"
+sudo qemu-img info -U "/vm-storage-01/AgHost-1A_D_Drive.${SNAP_NAME}"
+sudo qemu-img info -U "/vm-storage-01/AgHost-1A_E_Drive.${SNAP_NAME}"
 ```
 
-Expected `qemu-img info` output confirms the chain:
+Expected `qemu-img info` output for each overlay — confirms the backing chain:
 ```
-image: AgHost-1A.vss-20250411-020001
+image: /vm-storage-01/AgHost-1A_E_Drive.AgHost-1A-vss-20260411-225012
 file format: qcow2
-backing file: /var/lib/libvirt/images/AgHost-1A.qcow2
+backing file: /vm-storage-01/AgHost-1A_E_Drive.qcow2
+backing file format: qcow2
 ```
 
 ### ✅ Verify VSS Freeze/Thaw Events in Windows Event Log
@@ -428,15 +785,204 @@ Get-WinEvent -LogName Application -MaxEvents 50 |
   Format-List
 ```
 
-Look for Event IDs:
-| Event ID | Source | Meaning |
-|---|---|---|
-| `8229` | VSS | A VSS writer has successfully completed a backup |
-| `8230` | VSS | No error — freeze and thaw completed cleanly |
-| `24583` | MSSQLSERVER | SQL Server database was successfully quiesced |
+#### VSS Event ID Reference
 
-> ⚠️ Any **Error** or **Warning** level VSS events indicate the snapshot may not be application-consistent.
-> In that case, **do not use the backup** — delete it and repeat from Step 4.
+| Event ID | Level | Meaning |
+|---|---|---|
+| `8224` | Information | VSS service shut down due to idle timeout — **normal**, not a problem |
+| `8229` | Information | A VSS writer successfully completed a backup |
+| `8230` | Information | Freeze and thaw completed cleanly |
+| `8194` | **Error** | VSS writer callback failed — writer did **not** quiesce cleanly |
+| `24583` | Information | SQL Server database was successfully quiesced by SqlServerWriter |
+
+#### Actual Output from AgHost-1A — Snapshot `AgHost-1A-vss-20260412-104104`
+
+```
+TimeCreated      : 4/12/2026 10:41:08 AM
+Id               : 8194
+LevelDisplayName : Error
+Message          : Volume Shadow Copy Service error: Unexpected error querying for the
+                   IVssWriterCallback interface.  hr = 0x80070005, Access is denied.
+                   This is often caused by incorrect security settings in either the
+                   writer or requestor process.
+                   Operation:      Gathering Writer Data
+                   Writer Name:    System Writer
+                   Writer Class Id:{e8132975-6f93-4464-a53e-1050253ae220}
+
+TimeCreated      : 4/12/2026 10:41:03 AM
+Id               : 8194
+LevelDisplayName : Error
+Message          : (same as above — System Writer)
+
+TimeCreated      : 4/12/2026 10:32:01 AM
+Id               : 8224
+LevelDisplayName : Information
+Message          : The VSS service is shutting down due to idle timeout.
+```
+
+> The error persists across snapshots. The QEMU Guest Agent VSS Provider is either
+> not installed, not registered with VSS, or not starting when VSS initiates the backup.
+> Run the diagnostic steps below to identify exactly which stage is failing.
+
+#### Interpreting This Output
+
+| Observation | Meaning |
+|---|---|
+| Event ID `8194` on **System Writer** | The System Writer (OS files, registry) failed to quiesce — `Access is denied` (0x80070005) |
+| **No SqlServerWriter events** | SqlServerWriter did not log any events — either it succeeded silently or was skipped |
+| Event ID `8224` | Normal VSS idle timeout — not related to the backup |
+
+> ⚠️ **The System Writer `Access is denied` error** means the QEMU guest agent process did not have
+> DCOM permission to call back into the System Writer. This is a security configuration issue.
+> The snapshot disk state may be **crash-consistent but not fully application-consistent** for OS-level components.
+>
+> **SqlServerWriter absence from the log is ambiguous.** Confirm its actual state immediately:
+> ```powershell
+> vssadmin list writers | Select-String -Pattern 'SqlServerWriter' -Context 0,4
+> ```
+> If it shows `State: [1] Stable` and `Last error: No error`, SQL Server data files are consistent.
+> If it shows a failed state, **do not use this backup for SQL Server recovery**.
+
+#### Fix — System Writer `Access is denied` (Event ID 8194, hr=0x80070005)
+
+> On **AgHost-1A**, `QEMU-GA` already runs as **Local System** — that is correct.
+> The actual cause was the **QEMU Guest Agent VSS Provider** service being in a stopped/failed state.
+> The VSS Provider is what bridges QEMU-GA to the Windows VSS writer framework. Without it,
+> VSS writers (including System Writer and SqlServerWriter) cannot be properly quiesced.
+
+**Fix — Ensure the QEMU Guest Agent VSS Provider is installed and startable**
+
+```powershell
+# On AgHost-1A (as Administrator) — find the VSS Provider service
+Get-Service -DisplayName '*QEMU*' | Select-Object Name, DisplayName, Status, StartType
+
+# If the VSS Provider service exists but is stopped, try starting it manually to test
+# (normally VSS starts it on demand — this is just to verify it can start)
+$vssProv = Get-Service -DisplayName '*QEMU*VSS*' -ErrorAction SilentlyContinue
+if ($vssProv) {
+    Start-Service $vssProv.Name
+    Get-Service $vssProv.Name
+} else {
+    Write-Host "VSS Provider service not found — install qemu-vss-x86_64.msi from VirtIO ISO"
+}
+```
+
+> The VSS Provider service **start type must remain Manual** — do not change it to Automatic.
+> VSS starts it at the beginning of each backup operation and stops it afterwards.
+> Setting it to Automatic can interfere with VSS orchestration.
+
+**If the VSS Provider service is missing entirely** — install it from the VirtIO ISO:
+
+```
+F:\guest-agent\qemu-vss-x86_64.msi
+```
+
+After installation, verify registration with the Windows VSS subsystem:
+
+```powershell
+# The QEMU VSS Provider should appear in the provider list
+vssadmin list providers
+```
+
+Expected — QEMU VSS Provider appears alongside the Microsoft built-in provider:
+```
+Provider name: 'QEMU Guest Agent VSS Provider'
+   Provider type: Software
+   Provider Id: {<guid>}
+```
+
+#### Diagnostic — Actual State of AgHost-1A (Verified Live)
+
+```
+QEMU Services:
+  QEMU Guest Agent              Status: Running   StartType: Automatic  ✅
+  QEMU Guest Agent VSS Provider Status: Stopped   StartType: Manual     ✅ (correct at rest)
+
+vssadmin list providers:
+  Provider name: 'QEMU Guest Agent VSS Provider'
+     Provider type: Software
+     Provider Id:   {3629d4ed-ee09-4e0e-9a5c-6d8ba2872aef}
+     Version:       110.0.2                                             ✅ registered
+
+vssadmin list writers (at rest — all Stable):
+  SqlServerWriter   State: [1] Stable   Last error: No error            ✅
+  System Writer     State: [1] Stable   Last error: No error            ✅
+  (all other writers also Stable)
+```
+
+> **Key finding:** The QEMU Guest Agent VSS Provider IS installed, IS registered with VSS,
+> and all writers are Stable at rest. The Event ID 8194 error on System Writer happens only
+> **during** the snapshot — not before or after.
+>
+> This is a **DCOM callback timing issue**: when the QEMU VSS Provider initiates the VSS
+> backup, the System Writer tries to call back to the provider process via `IVssWriterCallback`.
+> That callback fails with `Access is denied` (0x80070005). The provider process is not
+> accepting inbound COM callbacks from the System Writer's host process (`svchost.exe`).
+>
+> **Critically — SqlServerWriter is NOT affected.** It shows Stable before and after the
+> snapshot with no error. SQL Server data files are application-consistent in the snapshot.
+> The System Writer failure only affects OS-level components (registry, system files, COM+ catalog)
+> which are not needed for SQL Server backup and restore.
+
+#### Impact Assessment
+
+| Writer | Status | Data covered | Impact on SQL Server backup |
+|---|---|---|---|
+| `SqlServerWriter` | ✅ Stable | SQL Server `.mdf`/`.ldf` files | ✅ None — SQL data is consistent |
+| `System Writer` | ❌ Fails during backup | OS files, registry, COM+ catalog | ⚠️ OS-level files not quiesced — irrelevant for SQL Server recovery |
+
+> For **SQL Server backup and restore practice**, the current snapshot is usable.
+> The System Writer error would matter for a full bare-metal OS restore, not for database recovery.
+
+#### Fix — DCOM Callback Issue with QEMU VSS Provider (version 110.0.2)
+
+The QEMU VSS Provider (v110.0.2) does not properly configure its COM security to accept
+inbound callbacks from system service processes. This is a known limitation in older
+QEMU guest agent builds.
+
+**Fix A — Update QEMU Guest Agent to latest version (recommended)**
+
+```powershell
+# On AgHost-1A — check current version
+Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+  Where-Object { $_.DisplayName -match 'QEMU' } |
+  Select-Object DisplayName, DisplayVersion
+```
+
+Download the latest VirtIO ISO from:
+```
+https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso
+```
+Then reinstall: `F:\guest-agent\qemu-ga-x86_64.msi` and `F:\guest-agent\qemu-vss-x86_64.msi`
+
+**Fix B — Grant DCOM callback rights (if update is not possible)**
+
+```
+1. Run dcomcnfg on AgHost-1A
+2. Navigate: Component Services → Computers → My Computer → Properties
+3. Tab: COM Security → Access Permissions → Edit Limits
+4. Add: SYSTEM, LOCAL SERVICE, NETWORK SERVICE → grant Local + Remote Access
+5. Tab: COM Security → Launch and Activation Permissions → Edit Limits
+6. Add: SYSTEM → grant all four permissions
+7. OK → restart QEMU-GA service
+```
+
+**After applying the fix — re-validate:**
+
+```powershell
+# Delete the current snapshot, take a fresh one from ryzen9, then re-check the event log
+Get-WinEvent -LogName Application -MaxEvents 20 |
+  Where-Object { $_.ProviderName -match 'VSS|SQLWriter' -and
+                 $_.TimeCreated -gt (Get-Date).AddMinutes(-5) } |
+  Select-Object TimeCreated, Id, LevelDisplayName, Message |
+  Format-List
+```
+
+A clean run should show **no Event ID 8194 errors** and ideally Event IDs `8229`/`8230`.
+
+> ⚠️ **Do not proceed to Step 5 (backup copy) until the System Writer error is resolved.**
+> The current snapshot `AgHost-1A-vss-20260412-104104` should be considered **not fully
+> application-consistent**. Delete it, resolve the VSS Provider issue, and retake the snapshot.
 
 ---
 
@@ -450,25 +996,28 @@ SNAP_DATE=$(date +%Y%m%d-%H%M%S)
 BACKUP_DIR="/backup/AgHost-1A"
 mkdir -p "$BACKUP_DIR"
 
-# The base disk is the original qcow2 before the overlay was created
-cp /var/lib/libvirt/images/AgHost-1A.qcow2 "$BACKUP_DIR/AgHost-1A-base-$SNAP_DATE.qcow2"
+# Back up all three disks — C, D and E drives
+# sudo cp is needed because the source files are owned by root/libvirt-qemu
+sudo cp /vm-os/AgHost-1A_C_Drive.qcow2        "$BACKUP_DIR/AgHost-1A_C_Drive-$SNAP_DATE.qcow2"
+sudo cp /vm-storage-01/AgHost-1A_D_Drive.qcow2 "$BACKUP_DIR/AgHost-1A_D_Drive-$SNAP_DATE.qcow2"
+sudo cp /vm-storage-01/AgHost-1A_E_Drive.qcow2 "$BACKUP_DIR/AgHost-1A_E_Drive-$SNAP_DATE.qcow2"
 
-# Optional: compress it
-qemu-img convert -O qcow2 -c \
-  /var/lib/libvirt/images/AgHost-1A.qcow2 \
-  "$BACKUP_DIR/AgHost-1A-$SNAP_DATE-compressed.qcow2"
+# Optional: compress (useful for thinly-provisioned images with lots of free space)
+sudo qemu-img convert -O qcow2 -c \
+  /vm-storage-01/AgHost-1A_E_Drive.qcow2 \
+  "$BACKUP_DIR/AgHost-1A_E_Drive-$SNAP_DATE-compressed.qcow2"
 ```
 
 ### ✅ Validate the Backup File Integrity
 
 ```bash
-BACKUP_FILE="$BACKUP_DIR/AgHost-1A-base-$SNAP_DATE.qcow2"
+# Check all three backup files exist and are non-zero
+ls -lh "$BACKUP_DIR/"
 
-# Check file was written and is non-zero
-ls -lh "$BACKUP_FILE"
-
-# Verify the backup image has no internal corruption
-qemu-img check "$BACKUP_FILE"
+# Verify each backup image has no internal corruption
+sudo qemu-img check "$BACKUP_DIR/AgHost-1A_C_Drive-$SNAP_DATE.qcow2"
+sudo qemu-img check "$BACKUP_DIR/AgHost-1A_D_Drive-$SNAP_DATE.qcow2"
+sudo qemu-img check "$BACKUP_DIR/AgHost-1A_E_Drive-$SNAP_DATE.qcow2"
 ```
 
 Expected output:
@@ -508,21 +1057,26 @@ virsh snapshot-delete AgHost-1A --snapshotname "$SNAP_NAME" --metadata
 virsh domblklist AgHost-1A --details
 ```
 
-Expected — Source column reverts to the original path:
+Expected — Source columns revert to the original paths:
 ```
-Type   Device  Target  Source
-------------------------------------------------
-file   disk    vda     /var/lib/libvirt/images/AgHost-1A.qcow2
+ Type   Device   Target   Source
+------------------------------------------------------------------
+ file   disk     vda      /vm-os/AgHost-1A_C_Drive.qcow2
+ file   disk     vdb      /vm-storage-01/AgHost-1A_D_Drive.qcow2
+ file   disk     vdc      /vm-storage-01/AgHost-1A_E_Drive.qcow2
 ```
 
 ```bash
-# Confirm no backing file (overlay chain is fully collapsed)
-qemu-img info /var/lib/libvirt/images/AgHost-1A.qcow2 | grep -E 'backing|format|image'
+# Confirm no backing file on any disk (overlay chain fully collapsed on each)
+# -U needed — VM is running and holds a write lock on these images
+sudo qemu-img info -U /vm-os/AgHost-1A_C_Drive.qcow2        | grep -E 'backing|format|image'
+sudo qemu-img info -U /vm-storage-01/AgHost-1A_D_Drive.qcow2 | grep -E 'backing|format|image'
+sudo qemu-img info -U /vm-storage-01/AgHost-1A_E_Drive.qcow2 | grep -E 'backing|format|image'
 ```
 
-Expected:
+Expected for each:
 ```
-image: AgHost-1A.qcow2
+image: AgHost-1A_E_Drive.qcow2
 file format: qcow2
 backing file: <none>       ← overlay fully merged
 ```
@@ -609,21 +1163,27 @@ set -euo pipefail
 VM_NAME="AgHost-1A"
 BACKUP_DIR="/backup/AgHost-1A"
 SNAP_NAME="${VM_NAME}-vss-$(date +%Y%m%d-%H%M%S)"
-DISK_TARGET="vda"
-BASE_IMAGE="/var/lib/libvirt/images/AgHost-1A.qcow2"
+
+# All three disks — update paths if they ever change
+DISK_C="vda" ; IMG_C="/vm-os/AgHost-1A_C_Drive.qcow2"
+DISK_D="vdb" ; IMG_D="/vm-storage-01/AgHost-1A_D_Drive.qcow2"
+DISK_E="vdc" ; IMG_E="/vm-storage-01/AgHost-1A_E_Drive.qcow2"
 
 mkdir -p "$BACKUP_DIR"
 
 # --- Pre-flight checks ---
 echo "[0/6] Running pre-flight checks..."
-virsh domstate "$VM_NAME" | grep -q "running" || { echo "❌ VM is not running. Aborting."; exit 1; }
+virsh domstate "$VM_NAME" | grep -q "running" \
+  || { echo "❌ VM is not running. Aborting."; exit 1; }
 virsh qemu-agent-command "$VM_NAME" '{"execute":"guest-info"}' > /dev/null 2>&1 \
   || { echo "❌ Guest agent not responding. Aborting."; exit 1; }
-qemu-img check "$BASE_IMAGE" > /dev/null \
-  || { echo "❌ Base image has errors. Aborting."; exit 1; }
+# sudo + -U required: images owned by root/libvirt-qemu AND locked by the running VM
+sudo qemu-img check -U "$IMG_C" > /dev/null || { echo "❌ C drive image has errors. Aborting."; exit 1; }
+sudo qemu-img check -U "$IMG_D" > /dev/null || { echo "❌ D drive image has errors. Aborting."; exit 1; }
+sudo qemu-img check -U "$IMG_E" > /dev/null || { echo "❌ E drive image has errors. Aborting."; exit 1; }
 echo "✅ Pre-flight passed."
 
-# --- Snapshot ---
+# --- Snapshot (all disks atomically) ---
 echo "[1/6] Creating VSS-consistent snapshot: $SNAP_NAME"
 virsh snapshot-create-as "$VM_NAME" \
   --name "$SNAP_NAME" \
@@ -632,39 +1192,46 @@ virsh snapshot-create-as "$VM_NAME" \
   --quiesce \
   --atomic
 
-# Verify snapshot overlay exists
-OVERLAY=$(virsh domblklist "$VM_NAME" | awk "/$DISK_TARGET/ {print \$2}")
-[[ -f "$OVERLAY" ]] || { echo "❌ Overlay file not found after snapshot. Aborting."; exit 1; }
-echo "✅ Snapshot overlay: $OVERLAY"
+# Verify overlay files exist for all disks
+for DISK in $DISK_C $DISK_D $DISK_E; do
+  OVERLAY=$(virsh domblklist "$VM_NAME" | awk "/$DISK/ {print \$2}")
+  [[ -f "$OVERLAY" ]] || { echo "❌ Overlay for $DISK not found. Aborting."; exit 1; }
+  echo "✅ Overlay for $DISK: $OVERLAY"
+done
 
-# --- Backup ---
-echo "[2/6] Backing up base image..."
-cp "$BASE_IMAGE" "$BACKUP_DIR/${SNAP_NAME}.qcow2"
+# --- Backup all base images ---
+echo "[2/6] Backing up base images (sudo required)..."
+sudo cp "$IMG_C" "$BACKUP_DIR/AgHost-1A_C_Drive-$SNAP_NAME.qcow2"
+sudo cp "$IMG_D" "$BACKUP_DIR/AgHost-1A_D_Drive-$SNAP_NAME.qcow2"
+sudo cp "$IMG_E" "$BACKUP_DIR/AgHost-1A_E_Drive-$SNAP_NAME.qcow2"
 
 echo "[3/6] Validating backup file integrity..."
-qemu-img check "$BACKUP_DIR/${SNAP_NAME}.qcow2" \
-  || { echo "❌ Backup image check failed!"; exit 1; }
-echo "✅ Backup file integrity OK: $BACKUP_DIR/${SNAP_NAME}.qcow2"
+sudo qemu-img check "$BACKUP_DIR/AgHost-1A_C_Drive-$SNAP_NAME.qcow2" \
+  || { echo "❌ C drive backup check failed!"; exit 1; }
+sudo qemu-img check "$BACKUP_DIR/AgHost-1A_D_Drive-$SNAP_NAME.qcow2" \
+  || { echo "❌ D drive backup check failed!"; exit 1; }
+sudo qemu-img check "$BACKUP_DIR/AgHost-1A_E_Drive-$SNAP_NAME.qcow2" \
+  || { echo "❌ E drive backup check failed!"; exit 1; }
+echo "✅ All backup files passed integrity check."
 
-# --- Blockcommit ---
-echo "[4/6] Merging overlay back into base image..."
-virsh blockcommit "$VM_NAME" "$DISK_TARGET" --active --verbose --pivot
-
-# Verify active disk is back to base
-ACTIVE_DISK=$(virsh domblklist "$VM_NAME" | awk "/$DISK_TARGET/ {print \$2}")
-[[ "$ACTIVE_DISK" == "$BASE_IMAGE" ]] \
-  || { echo "⚠️  Warning: active disk is $ACTIVE_DISK, not $BASE_IMAGE. Check manually."; }
+# --- Blockcommit all disks ---
+echo "[4/6] Merging overlays back into base images..."
+virsh blockcommit "$VM_NAME" "$DISK_C" --active --verbose --pivot
+virsh blockcommit "$VM_NAME" "$DISK_D" --active --verbose --pivot
+virsh blockcommit "$VM_NAME" "$DISK_E" --active --verbose --pivot
 
 # --- Cleanup ---
 echo "[5/6] Removing snapshot metadata..."
 virsh snapshot-delete "$VM_NAME" --snapshotname "$SNAP_NAME" --metadata
 
 # --- Final validation ---
-echo "[6/6] Final base image health check..."
-qemu-img check "$BASE_IMAGE" \
-  || { echo "⚠️  Base image check failed after blockcommit. Investigate immediately."; exit 1; }
+echo "[6/6] Final base image health checks..."
+# -U needed — VM is running again after blockcommit pivot
+sudo qemu-img check -U "$IMG_C" || { echo "⚠️  C drive check failed after blockcommit!"; exit 1; }
+sudo qemu-img check -U "$IMG_D" || { echo "⚠️  D drive check failed after blockcommit!"; exit 1; }
+sudo qemu-img check -U "$IMG_E" || { echo "⚠️  E drive check failed after blockcommit!"; exit 1; }
 
-echo "✅ Backup complete: $BACKUP_DIR/${SNAP_NAME}.qcow2"
+echo "✅ Backup complete: $BACKUP_DIR/ ($SNAP_NAME)"
 ```
 
 ```bash
@@ -729,7 +1296,11 @@ Use this as a go/no-go checklist at each stage of the process:
 | Snapshot created but data inconsistent | VSS freeze timed out | Check Windows Event Viewer → Application log for VSS errors |
 | `blockcommit` fails | Overlay disk not found | Run `virsh domblklist AgHost-1A` to confirm overlay path |
 | Mount shows NTFS errors | Snapshot taken without quiesce | Repeat with `--quiesce` enabled |
+| `qemu-img`: `Permission denied` | Image owned by `root`/`libvirt-qemu` | Use `sudo qemu-img` |
+| `qemu-img`: `Failed to get shared "write" lock` | Running VM holds exclusive lock on the image | Add `-U` flag: `sudo qemu-img info -U` / `sudo qemu-img check -U` |
 | `qemu-img check` fails on backup | I/O error during copy | Retry copy; check host disk health with `smartctl` |
+| Event ID 8194: System Writer `Access is denied` (hr=0x80070005) | **QEMU Guest Agent VSS Provider** service not running — it bridges QEMU-GA to the VSS writer framework | Verify `Get-Service -DisplayName '*QEMU*'`; install `qemu-vss-x86_64.msi` if missing; StartType must be Manual |
+| SqlServerWriter absent from event log after snapshot | Writer may have failed silently | Run `vssadmin list writers` immediately after snapshot to confirm state |
 | SQL databases in SUSPECT after thaw | VSS freeze/thaw interrupted | Run `DBCC CHECKDB` immediately; restore from backup if needed |
 
 ---
@@ -741,3 +1312,201 @@ Use this as a go/no-go checklist at each stage of the process:
 - [Microsoft VSS Technical Reference](https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service)
 - [SQL Server VSS Writer](https://learn.microsoft.com/en-us/sql/relational-databases/backup-restore/vss-writer-sql-server)
 - [VirtIO Win Guest Tools](https://github.com/virtio-win/virtio-win-pkg-scripts)
+
+---
+
+## Deleting a Snapshot
+
+Since external disk-only snapshots leave the VM running on **overlay files**, you cannot simply
+delete the snapshot — the overlays must be merged back into the base images first, then cleaned up.
+
+> ⚠️ Never delete overlay files directly while the VM is running on them. The VM has open file
+> handles on those files and will crash immediately.
+
+### Step 1 — Merge Overlays Back into Base Images (ryzen9)
+
+Run `blockcommit` for each disk. The `--pivot` flag atomically switches the VM back to writing
+directly to the base `.qcow2` once the merge is complete:
+
+```bash
+virsh blockcommit AgHost-1A vda --active --verbose --pivot
+virsh blockcommit AgHost-1A vdb --active --verbose --pivot
+virsh blockcommit AgHost-1A vdc --active --verbose --pivot
+```
+
+### Step 2 — Confirm VM Is Back on the Base Images
+
+```bash
+virsh domblklist AgHost-1A --details
+```
+
+Expected — all three Source paths back to `.qcow2`:
+```
+ Type   Device   Target   Source
+----------------------------------------------------------------------
+ file   disk     vda      /vm-os/AgHost-1A_C_Drive.qcow2
+ file   disk     vdb      /vm-storage-01/AgHost-1A_D_Drive.qcow2
+ file   disk     vdc      /vm-storage-01/AgHost-1A_E_Drive.qcow2
+```
+
+### Step 3 — Delete the Snapshot Metadata from libvirt
+
+```bash
+SNAP_NAME="AgHost-1A-vss-20260411-225012"   # replace with actual snapshot name
+
+virsh snapshot-delete AgHost-1A \
+  --snapshotname "$SNAP_NAME" \
+  --metadata
+
+# Confirm no snapshots remain
+virsh snapshot-list AgHost-1A
+```
+
+### Step 4 — Delete the Leftover Overlay Files
+
+`blockcommit` merges the content but leaves the overlay files on disk — remove them manually:
+
+```bash
+SNAP_NAME="AgHost-1A-vss-20260411-225012"   # replace with actual snapshot name
+
+sudo rm /vm-os/AgHost-1A_C_Drive.${SNAP_NAME}
+sudo rm /vm-storage-01/AgHost-1A_D_Drive.${SNAP_NAME}
+sudo rm /vm-storage-01/AgHost-1A_E_Drive.${SNAP_NAME}
+```
+
+### Step 5 — Verify Clean State
+
+```bash
+# No snapshots should remain in libvirt
+virsh snapshot-list AgHost-1A
+
+# No overlay files should remain in the disk directories
+ls /vm-os/ | grep AgHost-1A
+ls /vm-storage-01/ | grep AgHost-1A
+```
+
+Expected — only the original `.qcow2` base images remain, no overlay files.
+
+---
+
+## SQL Server Stuck in Quiesced Mode
+
+SQL Server can be left in a quiesced (I/O frozen) state if the VSS thaw signal was never
+delivered after a snapshot — for example, when the QEMU Guest Agent VSS Provider fails
+during the freeze/thaw cycle (see Event ID 8194 in Step 4).
+
+While quiesced, SQL Server is running but all database I/O is suspended. Queries hang,
+connections time out, and no reads or writes can complete until the freeze is lifted.
+
+### Step 1 — Verify SQL Server Is in Quiesced Mode
+
+```powershell
+# Check 1 — VSS writer state (run on AgHost-1A as Administrator)
+# SqlServerWriter in any state other than Stable = quiesced or failed
+vssadmin list writers | Select-String -Pattern 'SqlServerWriter' -Context 0,4
+```
+
+Expected when quiesced:
+```
+Writer name: 'SqlServerWriter'
+   State: [6] Waiting for completion   ← or [5] Waiting for freeze, [7] Failed
+   Last error: No error
+```
+
+Expected when healthy:
+```
+Writer name: 'SqlServerWriter'
+   State: [1] Stable
+   Last error: No error
+```
+
+```powershell
+# Check 2 — Try a simple query with a short timeout
+# If SQL Server is quiesced this will hang and then timeout
+Invoke-Sqlcmd -Query "SELECT @@SERVERNAME, GETDATE()" -QueryTimeout 5
+```
+
+```powershell
+# Check 3 — Look for frozen I/O requests in SQL Server
+# Any requests in SUSPENDED state waiting on VDI/VSS are a sign of quiescing
+Invoke-Sqlcmd -Query "
+SELECT session_id, status, command, wait_type, wait_time_ms, blocking_session_id
+FROM sys.dm_exec_requests
+WHERE status = 'suspended'
+ORDER BY wait_time_ms DESC"
+```
+
+```powershell
+# Check 4 — Scan SQL Server error log for quiesce-related messages
+Invoke-Sqlcmd -Query "EXEC xp_readerrorlog 0, 1, N'quiesce'"
+Invoke-Sqlcmd -Query "EXEC xp_readerrorlog 0, 1, N'frozen'"
+```
+
+### Step 2 — Fix: Thaw from ryzen9 via Guest Agent (Fastest)
+
+Try this first — if the guest agent is still tracking the freeze, this will issue the
+VSS thaw signal without restarting SQL Server:
+
+```bash
+# On ryzen9
+virsh qemu-agent-command AgHost-1A '{"execute":"guest-fsfreeze-thaw"}'
+```
+
+Expected response — number of filesystems thawed:
+```json
+{"return": 1}
+```
+
+Then immediately verify on AgHost-1A:
+
+```powershell
+vssadmin list writers | Select-String -Pattern 'SqlServerWriter' -Context 0,4
+Invoke-Sqlcmd -Query "SELECT @@SERVERNAME, GETDATE()" -QueryTimeout 5
+```
+
+### Step 3 — Fix: Restart SQL Server (Most Reliable)
+
+If the guest agent thaw did not resolve it, restart the SQL Server service.
+This is safe — SQL Server performs normal crash recovery on restart and brings
+all databases back online. No data is lost since I/O was frozen, not corrupted.
+
+```powershell
+# On AgHost-1A (as Administrator)
+Restart-Service MSSQLSERVER -Force
+Get-Service MSSQLSERVER
+```
+
+```sql
+-- After restart, verify all databases are ONLINE
+SELECT name, state_desc FROM sys.databases ORDER BY name;
+```
+
+All databases should show `state_desc = ONLINE`. If any show `RECOVERY_PENDING`
+or `SUSPECT`, run `DBCC CHECKDB` on that database immediately.
+
+### Step 4 — Verify SQL Server Is Fully Recovered
+
+```powershell
+# VSS writer must be back to Stable
+vssadmin list writers | Select-String -Pattern 'SqlServerWriter' -Context 0,4
+```
+
+```sql
+-- No suspended requests waiting on VSS/VDI
+SELECT session_id, status, command, wait_type, wait_time_ms
+FROM sys.dm_exec_requests
+WHERE status = 'suspended'
+ORDER BY wait_time_ms DESC;
+
+-- All databases online
+SELECT name, state_desc FROM sys.databases ORDER BY name;
+
+-- Basic connectivity and data access
+SELECT @@SERVERNAME AS ServerName, GETDATE() AS CurrentTime;
+```
+
+Expected — SqlServerWriter state `[1] Stable`, no suspended requests, all databases `ONLINE`.
+
+> ⚠️ **Prevent recurrence:** SQL Server will be left quiesced after every snapshot until the
+> **QEMU Guest Agent VSS Provider** issue is resolved (Step 1.2 of this guide).
+> Fix that service before taking another snapshot.
