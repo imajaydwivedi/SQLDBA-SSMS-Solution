@@ -5,90 +5,75 @@
 
 ## Overview
 
-This guide walks through performing a **VSS (Volume Shadow Copy Service)** snapshot backup of a SQL Server instance running inside a Windows Server virtual machine (`AgHost-1A`) hosted on a KVM hypervisor (`ryzen9` — Ubuntu Desktop).
+This guide covers **VSS (Volume Shadow Copy Service)** snapshot backup and restore of a
+SQL Server instance running on a Windows Server VM (`AgHost-1A`) hosted on a KVM
+hypervisor (`ryzen9` — Ubuntu Desktop), combined with transaction log backups for
+point-in-time recovery on a separate target VM (`SqlPoc`).
+
+### Environment
+
+| Component | Detail |
+|---|---|
+| **KVM Host** | `ryzen9` — Ubuntu Desktop, libvirt / QEMU |
+| **Source VM** | `AgHost-1A` — Windows Server, SQL Server |
+| **Target VM** | `SqlPoc` — separate SQL Server VM for restore practice |
+| **Backup Storage** | `/vm-storage-02/libvirt-images/` on ryzen9 |
+| **SQL drives snapshotted** | `vdc` → `E:\` (all MDF, LDF, T-log backup files) |
+| **Drives excluded** | `vda` → `C:\` (OS), `vdb` → `D:\` (not in use for SQL) |
 
 ### Architecture
 
 ```
-ryzen9 (Ubuntu Desktop - KVM Hypervisor)
+ryzen9 (Ubuntu Desktop — KVM Hypervisor)
+  │
   ├── AgHost-1A  (Windows Server VM — SQL Server)
-  │     ├── vda → C:\ (OS drive)
-  │     ├── vdb → D:\ (SQL data files)
-  │     └── vdc → E:\ (SQL log files + backups)
-  └── /vm-storage-02/libvirt-images/  (Backup destination)
+  │     ├── vda → C:\  OS drive           [snapshot=no]
+  │     ├── vdb → D:\  unused             [snapshot=no]
+  │     └── vdc → E:\  ALL SQL MDF/LDF    [snapshot=external ← only this]
+  │
+  ├── SqlPoc  (Windows Server VM — restore target)
+  │     └── vdd → T:\  backup qcow2 attached temporarily during restore
+  │
+  └── /vm-storage-02/libvirt-images/
+        └── AgHost-1A_E_Drive-<snap>.qcow2   (point-in-time backup)
 ```
-
-### End-to-End Flow
-
-![VSS Snapshot Backup — End-to-End Flow](../images/vss-backup-flow.png)
-
-> **SQL Server freeze window is ~1–2 seconds** regardless of disk size.
-> The copy and blockcommit phases happen entirely while the VM runs normally.
 
 ### How VSS Works with KVM
 
-1. The KVM guest agent (`qemu-guest-agent`) signals Windows inside the VM.
-2. Windows VSS freezes SQL Server I/O (via the SQL Writer VSS provider).
-3. KVM takes a consistent disk snapshot (external snapshot).
-4. VSS thaws SQL Server I/O — normal operations resume.
-5. The snapshot can be mounted, backed up, or exported from the host.
+1. `virsh snapshot-create-as --quiesce` signals `qemu-guest-agent` on AgHost-1A.
+2. Guest agent triggers **Windows VSS** — SQL Server VSS Writer freezes all database I/O.
+3. KVM creates an **external overlay** for `vdc` (E:\) — base image is now frozen.
+4. VSS thaws — SQL Server resumes in ~1–2 seconds; new writes go to the overlay.
+5. The frozen base image is copied to backup storage while the VM runs normally.
+6. The overlay is merged back (blockcommit) and removed — disks return to original state.
 
-### Snapshot vs. Backup — What Is Actually Fast?
+### Key Concept: What Is Actually Instant vs. What Takes Time
 
-> ⚠️ **Common misconception:** "Snapshot backup is fast."
->
-> The **snapshot creation is instant** (~1–2 seconds). The **data copy is not** — and the
-> two are separate phases. Understanding this distinction is critical.
+> The **snapshot creation is ~1–2 seconds** (SQL Server freeze window).
+> The **data copy** is proportional to disk size and storage speed — it runs while
+> the VM is fully online.
 
 | Phase | Duration | SQL Server state |
 |---|---|---|
 | VSS freeze | ~milliseconds | ❄️ I/O suspended |
-| Overlay file creation (the actual snapshot) | ~1 second | ❄️ I/O suspended |
+| Overlay creation (`vdc` only) | ~1 second | ❄️ I/O suspended |
 | VSS thaw — SQL Server resumes | ~milliseconds | ✅ Fully online |
-| Copy base images to backup destination | **Minutes to hours** (proportional to disk size) | ✅ Fully online |
-| Blockcommit + cleanup | 1–2 minutes | ✅ Fully online |
+| Copy E:\ base image to backup storage | ~12 min (57G HDD) | ✅ Fully online |
+| Blockcommit overlay → base + cleanup | ~2 min | ✅ Fully online |
 
-The copy phase for AgHost-1A (112G across 3 disks, spinning disk at ~75 MB/s):
+---
 
-| Drive | Size | Copy time (Run 3) |
-|---|---|---|
-| C (`vda`) | 37 G | ~8 min |
-| D (`vdb`) | 18 G | ~4 min |
-| E (`vdc`) | 57 G | ~14 min |
-| **Total** | **112 G** | **~28 min total** |
+### Backup Flow
 
-**SQL Server was frozen for ~1–2 seconds.** The remaining 26+ minutes the VM ran
-normally and served queries while the copy happened in the background on the host.
+![VSS Backup Flow](../images/vss-backup-flow.png)
 
-The copy speed depends entirely on storage throughput:
+### Restore Flow
 
-| Storage type | Expected throughput | 112G copy time |
-|---|---|---|
-| Spinning disk (HDD) | ~75–120 MB/s | 15–25 min |
-| SSD (SATA) | ~400–500 MB/s | 4–5 min |
-| NVMe SSD | ~2,000–3,500 MB/s | < 1 min |
-| Network (1 GbE NFS) | ~100–110 MB/s | ~17 min |
+![VSS Restore Flow](../images/vss-restore-flow.png)
 
-### Eliminating the Copy Step — `virsh backup-begin` (Option C)
+### PITR (Point-in-Time Recovery) Flow
 
-Instead of snapshot → copy → blockcommit, libvirt 7.2+ can stream directly to the backup
-destination with native incremental support:
-
-```bash
-# Full backup — streams directly to backup destination, no separate copy step
-virsh backup-begin AgHost-1A --backupxml backup-full.xml
-
-# Subsequent runs — only changed blocks since last checkpoint (much faster)
-virsh backup-begin AgHost-1A --backupxml backup-incremental.xml \
-  --checkpointxml checkpoint.xml
-```
-
-> **POC / Learning note — performance impact:**
-> A one-time full `virsh backup-begin` backup completes and leaves **no residual performance
-> impact** on the VM. The dirty bitmap tracking that enables incremental backups only causes
-> overhead when a **checkpoint is kept active** between backup runs.
-> For a single POC backup with no further incremental runs planned, simply do not create or
-> retain a checkpoint — the VM runs at full speed after the backup completes.
+![VSS PITR Flow](../images/vss-pitr-flow.png)
 
 ---
 
@@ -1681,48 +1666,31 @@ Expected — SqlServerWriter state `[1] Stable`, no suspended requests, all data
 
 ## Restore from VSS Snapshot Backup to SqlPoc
 
-The VSS snapshot qcow2 **is** the full backup — no `BACKUP DATABASE` is needed.
-The snapshot captures raw MDF/LDF files at a VSS-consistent point. T-log backups are
-taken separately on the running AgHost-1A after the snapshot completes, forming the
-roll-forward chain. This mirrors the production EC2/EBS VSS strategy exactly.
+The VSS snapshot qcow2 **is** the full backup — no `BACKUP DATABASE` is needed before
+taking the snapshot. The snapshot captures MDF/LDF files at a VSS-consistent point.
+T-log backups run independently on AgHost-1A and form the roll-forward chain.
 
-### How This Maps to the Production EC2 Strategy
+### Why No `BACKUP DATABASE` Is Needed
 
-| Production (EC2/EBS) | This POC (KVM/qcow2) |
-|---|---|
-| VSS freeze → EBS snapshot → thaw | VSS freeze → qcow2 copy → thaw |
-| `take_txn_logs_backup` on running EC2 | `BACKUP LOG` on running AgHost-1A |
-| Restore EBS volume → attach to new EC2 | Attach qcow2 to SqlPoc as `T:\` |
-| Copy MDF/LDF → SQL Server crash recovery | Copy MDF/LDF → attach DB → crash recovery |
-| Tail-log backup WITH NORECOVERY | Tail-log backup WITH NORECOVERY |
-| Apply T-logs WITH NORECOVERY | Apply T-logs WITH NORECOVERY |
-| RESTORE WITH RECOVERY → ONLINE | RESTORE WITH RECOVERY → ONLINE |
+VSS freezes SQL Server I/O before KVM takes the snapshot. The resulting E:\ qcow2 contains
+MDF/LDF files in an application-consistent state — identical to what a full backup
+produces, but captured at the disk level. SQL Server can attach these files directly and
+run crash recovery to bring them to a clean state.
 
-### The Tail-Log: The Missing Bridge
+### The Tail-Log: The Bridge Between Snapshot and T-Log Chain
 
-After crash recovery the database is **ONLINE** — but T-logs can only be applied to a
-database in **RESTORING** state. The tail-log backup is what bridges the two:
+After crash recovery via `FOR ATTACH`, the database is **ONLINE** at the snapshot LSN.
+T-logs can only be applied to a database in **RESTORING** state. The tail-log backup
+transitions the database from ONLINE → RESTORING so the T-log chain can continue:
 
 ```
-Snapshot (MDF/LDF frozen at LSN X)
-  → copy files to SqlPoc → attach → crash recovery → DB ONLINE at LSN X
-  → BACKUP LOG WITH NORECOVERY  ← tail-log: captures LSN X → puts DB into RESTORING
-  → RESTORE LOG (log1.trn)  WITH NORECOVERY  ← LSN X+1 onward
-  → RESTORE LOG (log2.trn)  WITH NORECOVERY
-  → RESTORE DATABASE WITH RECOVERY → ONLINE at desired LSN
-```
-
-### Architecture
-
-```
-ryzen9 (KVM Host)
-  ├── AgHost-1A  (Source — SQL Server, E:\ holds all MDF/LDF files)
-  ├── SqlPoc     (Target — SQL Server VM for restore/DR practice)
-  └── /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-<snap>.qcow2  (snapshot backup)
-                         │
-                         └─ attached to SqlPoc as T:\ (read-only, temporary)
-                            MDF/LDF copied to SqlPoc local drives
-                            T:\ detached and qcow2 deleted after restore
+E:\ qcow2 attached as T:\ on SqlPoc
+  → Copy MDF/LDF from T:\ to SqlPoc local drives
+  → CREATE DATABASE FOR ATTACH → crash recovery → DB ONLINE at snapshot LSN
+  → BACKUP LOG WITH NORECOVERY   ← tail-log: closes LSN gap, puts DB into RESTORING
+  → RESTORE LOG tlog1.trn WITH NORECOVERY, STOPAT='target'
+  → RESTORE LOG tlog2.trn WITH NORECOVERY, STOPAT='target'
+  → RESTORE DATABASE WITH RECOVERY → DB ONLINE at target timestamp
 ```
 
 ---
@@ -2091,9 +2059,10 @@ echo "Backup qcow2 deleted"
 
 ---
 
-### Production Bugs to Avoid in This POC
+### Common Pitfalls to Avoid
 
-The following bugs are from the production EC2 implementation. This POC avoids all of them:
+The following are real issues seen in SQL Server VSS restore implementations.
+This POC explicitly guards against all of them:
 
 | Bug | Production code | Problem | POC fix |
 |---|---|---|---|
