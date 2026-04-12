@@ -1681,85 +1681,92 @@ Expected — SqlServerWriter state `[1] Stable`, no suspended requests, all data
 
 ## Restore from VSS Snapshot Backup to SqlPoc
 
-The backup qcow2 (E:\ snapshot) is attached **directly to the target VM** as a temporary
-disk. Windows sees it as a new drive (assigned `T:\`). SQL Server on SqlPoc reads the
-native `.bak` and `.trn` files directly from `T:\`, restores user databases in
-`NORECOVERY` mode, applies T-log backups, and then the `T:\` disk is cleanly removed.
+The VSS snapshot qcow2 **is** the full backup — no `BACKUP DATABASE` is needed.
+The snapshot captures raw MDF/LDF files at a VSS-consistent point. T-log backups are
+taken separately on the running AgHost-1A after the snapshot completes, forming the
+roll-forward chain. This mirrors the production EC2/EBS VSS strategy exactly.
+
+### How This Maps to the Production EC2 Strategy
+
+| Production (EC2/EBS) | This POC (KVM/qcow2) |
+|---|---|
+| VSS freeze → EBS snapshot → thaw | VSS freeze → qcow2 copy → thaw |
+| `take_txn_logs_backup` on running EC2 | `BACKUP LOG` on running AgHost-1A |
+| Restore EBS volume → attach to new EC2 | Attach qcow2 to SqlPoc as `T:\` |
+| Copy MDF/LDF → SQL Server crash recovery | Copy MDF/LDF → attach DB → crash recovery |
+| Tail-log backup WITH NORECOVERY | Tail-log backup WITH NORECOVERY |
+| Apply T-logs WITH NORECOVERY | Apply T-logs WITH NORECOVERY |
+| RESTORE WITH RECOVERY → ONLINE | RESTORE WITH RECOVERY → ONLINE |
+
+### The Tail-Log: The Missing Bridge
+
+After crash recovery the database is **ONLINE** — but T-logs can only be applied to a
+database in **RESTORING** state. The tail-log backup is what bridges the two:
+
+```
+Snapshot (MDF/LDF frozen at LSN X)
+  → copy files to SqlPoc → attach → crash recovery → DB ONLINE at LSN X
+  → BACKUP LOG WITH NORECOVERY  ← tail-log: captures LSN X → puts DB into RESTORING
+  → RESTORE LOG (log1.trn)  WITH NORECOVERY  ← LSN X+1 onward
+  → RESTORE LOG (log2.trn)  WITH NORECOVERY
+  → RESTORE DATABASE WITH RECOVERY → ONLINE at desired LSN
+```
 
 ### Architecture
 
 ```
 ryzen9 (KVM Host)
-  ├── AgHost-1A   (Source — SQL Server, E:\ holds data/logs/backups)
-  ├── SqlPoc      (Target — separate SQL Server VM for restore practice)
-  └── /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-<snap>.qcow2  (backup)
-                           │
-                           └─ attached to SqlPoc as T:\ during restore
-                              detached and deleted after restore completes
-```
-
-### Why Attach as T:\ Instead of Mounting on the Host
-
-| Approach | Pros | Cons |
-|---|---|---|
-| `qemu-nbd` on ryzen9 + SCP | Host-only, no guest changes | Needs NTFS driver, two-step copy |
-| **Attach qcow2 to SqlPoc as T:\\** | SQL Server reads files directly — no copy needed, no host NTFS mount | Requires a free virsh disk slot on SqlPoc |
-
-### Important: Native SQL Backups Must Be on E:\
-
-A KVM VSS snapshot captures raw MDF/LDF files **plus any files already on E:\**.
-`RESTORE DATABASE ... WITH NORECOVERY` requires a `.bak` file — it cannot work from raw
-MDF/LDF directly. The `.bak` and `.trn` files must be written to `E:\SQLBackups\` on
-AgHost-1A **before** the VSS snapshot is taken so they are captured inside the qcow2.
-
-```
-AgHost-1A  →  BACKUP DATABASE → E:\SQLBackups\DB_full.bak
-           →  BACKUP LOG      → E:\SQLBackups\DB_log1.trn  (repeat as needed)
-           →  VSS snapshot (E:\ only)  →  backup qcow2 contains both .bak + .trn
-SqlPoc     →  attach qcow2 as T:\  →  RESTORE from T:\SQLBackups\  WITH NORECOVERY
-           →  RESTORE LOG from T:\SQLBackups\  (repeat per .trn)
-           →  RESTORE WITH RECOVERY  →  DB ONLINE
-ryzen9     →  virsh detach-disk SqlPoc  →  delete qcow2
+  ├── AgHost-1A  (Source — SQL Server, E:\ holds all MDF/LDF files)
+  ├── SqlPoc     (Target — SQL Server VM for restore/DR practice)
+  └── /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-<snap>.qcow2  (snapshot backup)
+                         │
+                         └─ attached to SqlPoc as T:\ (read-only, temporary)
+                            MDF/LDF copied to SqlPoc local drives
+                            T:\ detached and qcow2 deleted after restore
 ```
 
 ---
 
-### Step 1 — Prepare AgHost-1A: Take Native Backups to E:\
+### Step 1 — Pre-requisite on AgHost-1A: Full Recovery Model + Ongoing T-Log Backups
+
+> No `BACKUP DATABASE` needed — the VSS snapshot is the full backup.
+> The only requirement is that databases are in `FULL` recovery model so a T-log chain exists.
 
 ```sql
--- Run on AgHost-1A
+-- Run on AgHost-1A — one-time setup per database
 
--- Ensure FULL recovery model for each user database to be restored
+-- Ensure FULL recovery model (required for T-log chain)
 ALTER DATABASE [YourDatabase] SET RECOVERY FULL;
 GO
 
--- Full backup — captured inside the snapshot
-BACKUP DATABASE [YourDatabase]
-TO DISK = N'E:\SQLBackups\YourDatabase_full.bak'
-WITH FORMAT, COMPRESSION, STATS = 10;
-GO
+-- Verify
+SELECT name, recovery_model_desc FROM sys.databases
+WHERE name NOT IN ('master','model','msdb','tempdb')
+ORDER BY name;
+-- Expected: FULL
+```
 
--- One or more T-log backups taken AFTER the full backup
-BACKUP LOG [YourDatabase]
-TO DISK = N'E:\SQLBackups\YourDatabase_log1.trn'
-WITH COMPRESSION, STATS = 10;
-GO
+T-log backups should be running on a schedule (e.g., every 15–30 min via SQL Agent job):
 
--- Repeat BACKUP LOG as needed to build a roll-forward chain
+```sql
+-- Sample scheduled T-log backup job step (runs on AgHost-1A)
 BACKUP LOG [YourDatabase]
-TO DISK = N'E:\SQLBackups\YourDatabase_log2.trn'
+TO DISK = N'E:\TLogBackups\YourDatabase_' +
+          REPLACE(REPLACE(CONVERT(varchar,GETDATE(),120),':',''),'-','') + '.trn'
 WITH COMPRESSION, STATS = 10;
 GO
 ```
 
-> Repeat for each user database. System databases (`master`, `model`, `msdb`)
-> do not need to be restored on SqlPoc for this POC.
+> These `.trn` files accumulate on `E:\TLogBackups\` and form the roll-forward chain
+> from the snapshot point onward. Copy them to SqlPoc when you are ready to restore.
 
-### Step 2 — Take the VSS Snapshot and Save E:\ Backup (ryzen9)
+### Step 2 — Take the VSS Snapshot and Save E:\ qcow2 (ryzen9)
 
 ```bash
 SNAP_NAME="AgHost-1A-edrv-$(date +%Y%m%d-%H%M%S)"
 
+# VSS freeze → snapshot vdc (E:\) only → VSS thaw
+# AgHost-1A resumes immediately; SQL Server is unfrozen
 virsh snapshot-create-as AgHost-1A \
   --name "$SNAP_NAME" \
   --description "E-drive-only VSS snapshot for SqlPoc restore" \
@@ -1768,20 +1775,23 @@ virsh snapshot-create-as AgHost-1A \
   --diskspec vdc,snapshot=external \
   --disk-only --quiesce --atomic
 
-# Save the E:\ base image (contains .mdf/.ldf/.bak/.trn at snapshot time)
+# Copy the E:\ base image (frozen at snapshot LSN) to backup storage
 sudo cp /vm-storage-01/AgHost-1A_E_Drive.qcow2 \
   /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2
 
-# Verify the backup copy
+# Verify integrity
 sudo qemu-img check \
   /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2 \
   && echo "Backup OK"
 
-# Blockcommit overlay and cleanup
+# Blockcommit overlay — AgHost-1A is already running on the overlay during copy
 virsh blockcommit AgHost-1A vdc --active --pivot
 virsh snapshot-delete AgHost-1A --snapshotname "$SNAP_NAME" --metadata
 sudo rm -f /vm-storage-01/AgHost-1A_E_Drive.${SNAP_NAME}
 ```
+
+> **AgHost-1A continues running and taking T-log backups while the qcow2 copy happens.**
+> T-log backups written to `E:\TLogBackups\` after the snapshot are the roll-forward chain.
 
 ### Step 3 — Attach Backup qcow2 to SqlPoc as T:\ (ryzen9)
 
@@ -1813,80 +1823,120 @@ Expected — `vdd` now shows the backup qcow2:
 
 ### Step 4 — Bring T:\ Online in Windows on SqlPoc
 
-On **SqlPoc** (run in PowerShell as Administrator):
+On **SqlPoc** (PowerShell as Administrator):
 
 ```powershell
-# Find the new disk — it will show as Offline, RAW or NTFS
-Get-Disk | Where-Object OperationalStatus -eq 'Offline' | Select Number, Size, PartitionStyle
+# Find the new offline disk
+Get-Disk | Where-Object OperationalStatus -eq 'Offline' |
+    Select-Object Number, Size, PartitionStyle
 
-# Bring it online (read-only flag since we attached --readonly)
-$disk = Get-Disk | Where-Object OperationalStatus -eq 'Offline'
+# Bring online as read-only (attached --readonly from hypervisor)
+$disk = Get-Disk | Where-Object OperationalStatus -eq 'Offline' | Select-Object -First 1
 Set-Disk -Number $disk.Number -IsOffline $false
 Set-Disk -Number $disk.Number -IsReadOnly $true
 
-# Assign T:\ drive letter to its partition
+# Assign T:\ drive letter
 $part = Get-Partition -DiskNumber $disk.Number | Where-Object Type -ne 'Reserved'
 $part | Add-PartitionAccessPath -AccessPath "T:\"
 
-# Verify T:\ is accessible
+# Verify — should see MDF/LDF files and TLogBackups folder
 Get-PSDrive T
-dir T:\SQLBackups\
+Get-ChildItem T:\ -Recurse -Depth 1 | Select-Object FullName, Length
 ```
 
-Expected — `.bak` and `.trn` files visible on `T:\SQLBackups\`.
+Expected — MDF/LDF files and `TLogBackups` folder visible on `T:\`.
 
-### Step 5 — Restore Full Backup WITH NORECOVERY on SqlPoc
+### Step 5 — Copy MDF/LDF Files from T:\ to SqlPoc Local Drives
+
+The snapshot raw data files are the database at the VSS-consistent point.
+Copy them off T:\ so SqlPoc's SQL Server can attach them locally:
+
+```powershell
+# Create target folders if they don't exist
+New-Item -ItemType Directory -Force -Path "E:\SQLData"
+New-Item -ItemType Directory -Force -Path "E:\SQLLogs"
+
+# Copy each database's data and log files from T:\ to local drives
+Copy-Item "T:\SQLData\YourDatabase.mdf"     "E:\SQLData\YourDatabase.mdf"
+Copy-Item "T:\SQLData\YourDatabase_log.ldf" "E:\SQLLogs\YourDatabase_log.ldf"
+
+# Repeat for each user database
+```
+
+> T:\ can now be removed — all necessary files are on SqlPoc's local drives.
+
+### Step 6 — Attach the Database and Let SQL Server Run Crash Recovery
+
+SQL Server opens the copied MDF/LDF, runs crash recovery (rolls back any uncommitted
+transactions from the freeze point), and brings the database **ONLINE**:
 
 ```sql
 -- Run on SqlPoc SQL Server instance
 
--- Check what logical file names are inside the backup
-RESTORE FILELISTONLY
-FROM DISK = N'T:\SQLBackups\YourDatabase_full.bak';
+-- Attach the database from the copied MDF/LDF files
+CREATE DATABASE [YourDatabase]
+ON (FILENAME = N'E:\SQLData\YourDatabase.mdf'),
+   (FILENAME = N'E:\SQLLogs\YourDatabase_log.ldf')
+FOR ATTACH;
 GO
 
--- Restore with NORECOVERY — database stays in RESTORING state
-RESTORE DATABASE [YourDatabase]
-FROM DISK = N'T:\SQLBackups\YourDatabase_full.bak'
-WITH
-    MOVE N'YourDatabase'      TO N'E:\SQLData\YourDatabase.mdf',
-    MOVE N'YourDatabase_log'  TO N'E:\SQLLogs\YourDatabase.ldf',
-    NORECOVERY,
-    REPLACE,
-    STATS = 10;
+-- Verify it came ONLINE
+SELECT name, state_desc FROM sys.databases WHERE name = N'YourDatabase';
+-- Expected: ONLINE  (SQL Server completed crash recovery at the snapshot LSN)
+```
+
+### Step 7 — Take Tail-Log Backup WITH NORECOVERY (The Bridge Step)
+
+The database is currently ONLINE at the snapshot LSN. Taking a tail-log backup with
+`NORECOVERY` does two things simultaneously:
+1. Captures any log records generated during crash recovery (closes the gap)
+2. Puts the database into **RESTORING** state — T-logs can now be applied
+
+```sql
+-- Tail-log backup — captures log from snapshot LSN and puts DB into RESTORING
+BACKUP LOG [YourDatabase]
+TO DISK = N'E:\TLogBackups\YourDatabase_tail.trn'
+WITH NORECOVERY, COMPRESSION, STATS = 10;
 GO
 
--- Verify database is in RESTORING state
+-- Verify DB is now in RESTORING state
 SELECT name, state_desc FROM sys.databases WHERE name = N'YourDatabase';
 -- Expected: RESTORING
 ```
 
-> Adjust `MOVE` paths to match SqlPoc's local drive layout.
-> Repeat this step for each user database.
+> ⚠️ **Do not skip this step.** Without the tail-log, the database is ONLINE and
+> subsequent `RESTORE LOG` commands will fail. The tail-log is the bridge between the
+> snapshot (crash-recovered, ONLINE) and the T-log chain (RESTORING).
 
-### Step 6 — Apply T-Log Backups (Roll Forward)
+### Step 8 — Apply T-Log Backups from AgHost-1A (Roll Forward)
+
+Copy the `.trn` files from AgHost-1A's `E:\TLogBackups\` to SqlPoc, then apply in
+**chronological order**. Only T-logs taken **after the snapshot timestamp** are relevant:
 
 ```sql
--- Apply each T-log in chronological order — NORECOVERY for all but the last
+-- Apply each T-log in order — NORECOVERY for all but the final one
 
 RESTORE LOG [YourDatabase]
-FROM DISK = N'T:\SQLBackups\YourDatabase_log1.trn'
+FROM DISK = N'E:\TLogBackups\YourDatabase_20260412_1300.trn'
 WITH NORECOVERY, STATS = 10;
 GO
 
 RESTORE LOG [YourDatabase]
-FROM DISK = N'T:\SQLBackups\YourDatabase_log2.trn'
+FROM DISK = N'E:\TLogBackups\YourDatabase_20260412_1315.trn'
 WITH NORECOVERY, STATS = 10;
 GO
 
--- Add STOPAT to stop at a specific point in time within a log:
--- WITH NORECOVERY, STOPAT = '2026-04-12T14:00:00', STATS = 10;
+-- Point-in-time: stop within a specific log file using STOPAT
+RESTORE LOG [YourDatabase]
+FROM DISK = N'E:\TLogBackups\YourDatabase_20260412_1330.trn'
+WITH NORECOVERY, STOPAT = '2026-04-12T13:25:00', STATS = 10;
+GO
 ```
 
-### Step 7 — Bring Databases Online (Final Recovery)
+### Step 9 — Bring Databases Online (Final Recovery)
 
 ```sql
--- After all T-logs applied, recover each database
+-- Recover the database — no more T-logs will be applied
 RESTORE DATABASE [YourDatabase] WITH RECOVERY;
 GO
 
@@ -1895,36 +1945,27 @@ SELECT name, state_desc, recovery_model_desc
 FROM sys.databases
 WHERE name NOT IN ('master','model','msdb','tempdb')
 ORDER BY name;
--- Expected: state_desc = ONLINE for all restored databases
+-- Expected: state_desc = ONLINE
 ```
 
-### Step 8 — Remove T:\ Drive and Detach Disk
+### Step 10 — Remove T:\ and Detach the Backup qcow2
 
-**On SqlPoc (PowerShell as Administrator) — remove T:\ drive letter first:**
+**On SqlPoc (PowerShell) — remove drive letter and take disk offline:**
 
 ```powershell
-# Remove the T:\ access path
-$disk = Get-Disk | Where-Object { $_.IsReadOnly -eq $true -and $_.PartitionStyle -ne 'RAW' } |
-        Select-Object -First 1
+$disk = Get-Disk | Where-Object { $_.IsReadOnly -eq $true } | Select-Object -First 1
 $part = Get-Partition -DiskNumber $disk.Number | Where-Object Type -ne 'Reserved'
 $part | Remove-PartitionAccessPath -AccessPath "T:\"
-
-# Take the disk offline so the hypervisor can safely detach it
 Set-Disk -Number $disk.Number -IsOffline $true
-
-Write-Host "T:\ removed and disk offline — safe to detach from hypervisor"
+Write-Host "T:\ removed — disk offline, safe to detach"
 ```
 
-**On ryzen9 — hot-detach and delete the backup qcow2:**
+**On ryzen9 — hot-detach and delete:**
 
 ```bash
-# Detach the disk from SqlPoc (matches the target name used during attach)
 virsh detach-disk SqlPoc vdd --live
+virsh domblklist SqlPoc --details        # confirm vdd is gone
 
-# Confirm disk is gone
-virsh domblklist SqlPoc --details
-
-# Delete the backup qcow2 once restore is confirmed complete
 sudo rm -f /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2
 echo "Backup qcow2 deleted"
 ```
@@ -1933,17 +1974,18 @@ echo "Backup qcow2 deleted"
 
 | Step | Where | Action |
 |---|---|---|
-| 1 | AgHost-1A (SQL) | `BACKUP DATABASE` + `BACKUP LOG` → `E:\SQLBackups\` |
+| 1 | AgHost-1A (SQL) | Ensure `FULL` recovery; T-log backups running on schedule |
 | 2 | ryzen9 | E:\ only VSS snapshot → copy qcow2 to `/vm-storage-02/` |
 | 3 | ryzen9 | `virsh attach-disk SqlPoc ... vdd --readonly --live` |
 | 4 | SqlPoc (PowerShell) | Bring disk online read-only → assign `T:\` |
-| 5 | SqlPoc (SQL) | `RESTORE DATABASE ... FROM T:\... WITH NORECOVERY` |
-| 6 | SqlPoc (SQL) | `RESTORE LOG ... WITH NORECOVERY` (repeat per `.trn`) |
-| 7 | SqlPoc (SQL) | `RESTORE DATABASE ... WITH RECOVERY` → ONLINE |
-| 8 | SqlPoc (PowerShell) | Remove `T:\`, take disk offline |
-| 8 | ryzen9 | `virsh detach-disk SqlPoc vdd` → delete qcow2 |
+| 5 | SqlPoc (PowerShell) | Copy MDF/LDF from `T:\` to local `E:\SQLData\` / `E:\SQLLogs\` |
+| 6 | SqlPoc (SQL) | `CREATE DATABASE ... FOR ATTACH` → crash recovery → **ONLINE** |
+| 7 | SqlPoc (SQL) | `BACKUP LOG WITH NORECOVERY` (tail-log) → **RESTORING** ← key step |
+| 8 | SqlPoc (SQL) | `RESTORE LOG ... WITH NORECOVERY` per `.trn` (roll forward) |
+| 9 | SqlPoc (SQL) | `RESTORE DATABASE WITH RECOVERY` → **ONLINE** at desired LSN |
+| 10 | SqlPoc + ryzen9 | Remove `T:\` → offline disk → `virsh detach-disk` → delete qcow2 |
 
-> **T:\ is temporary by design.** It is attached read-only, used only as a source for
-> `RESTORE` commands, and removed immediately after. The restored database files live on
-> SqlPoc's own local drives (`E:\SQLData\`, `E:\SQLLogs\`), completely independent of
-> the backup disk.
+> **Key insight:** No `BACKUP DATABASE` is ever taken on AgHost-1A. The VSS snapshot IS
+> the full backup. The tail-log backup in Step 7 is what bridges the crash-recovered
+> (ONLINE) database into RESTORING state so the T-log chain can be applied — exactly
+> the same mechanism used in production EC2/EBS VSS restore workflows.
