@@ -1,4 +1,7 @@
 # VSS Snapshot Backup of SQL Server on KVM
+- [BrentOzar - The Perils Of VSS Snaps](https://www.brentozar.com/archive/2018/01/perils-vss-snaps/)
+- [A Guide for SQL Server Backup Application Vendors](https://learn.microsoft.com/en-us/previous-versions/sql/sql-server-2005/administrator/cc966520(v=technet.10)?redirectedfrom=MSDN)
+- [SQL Server backup applications - Volume Shadow Copy Service (VSS) and SQL Writer](https://learn.microsoft.com/en-us/sql/relational-databases/backup-restore/sql-server-vss-writer-backup-guide?view=sql-server-ver17)
 
 ## Overview
 
@@ -8,9 +11,52 @@ This guide walks through performing a **VSS (Volume Shadow Copy Service)** snaps
 
 ```
 ryzen9 (Ubuntu Desktop - KVM Hypervisor)
-  └── AgHost-1A (Windows Server VM - SQL Server)
-        └── VSS Snapshot → Backup
+  ├── AgHost-1A  (Windows Server VM — SQL Server)
+  │     ├── vda → C:\ (OS drive)
+  │     ├── vdb → D:\ (SQL data files)
+  │     └── vdc → E:\ (SQL log files + backups)
+  └── /vm-storage-02/libvirt-images/  (Backup destination)
 ```
+
+### End-to-End Flow
+
+```mermaid
+flowchart TD
+    subgraph HOST["ryzen9 — KVM Hypervisor"]
+        direction TB
+        PF["🔍 Pre-flight Checks\n• VM running?\n• Guest agent reachable?\n• Disk images healthy?"]
+        SNAP["📸 virsh snapshot-create-as\n--disk-only --quiesce --atomic"]
+        OVL["Overlay files created\n(new writes go here)"]
+        CP["📂 Copy base images\nto /vm-storage-02/\n(VM runs normally)"]
+        VER["✅ Verify backup\nqemu-img check"]
+        BC["🔀 Blockcommit overlays\nback into base images\n+ pivot active disk"]
+        CLN["🗑️ Cleanup\nDelete snapshot metadata\nRemove overlay files"]
+        FHC["🩺 Final health check\nqemu-img check on live disks"]
+        BKP[("💾 Backup .qcow2 files\n/vm-storage-02/libvirt-images/")]
+    end
+
+    subgraph VM["AgHost-1A — Windows Server VM"]
+        direction TB
+        SQL["🗄️ SQL Server\n(running normally)"]
+        VSS_FREEZE["❄️ VSS Freeze\nSQL Writer freezes I/O\n~1–2 seconds"]
+        VSS_THAW["✅ VSS Thaw\nSQL Server resumes\nI/O unfrozen"]
+    end
+
+    PF --> SNAP
+    SNAP -->|"qemu-guest-agent\n--quiesce signal"| VSS_FREEZE
+    VSS_FREEZE --> OVL
+    OVL -->|"Snapshot complete\nthaw signal"| VSS_THAW
+    VSS_THAW --> SQL
+    OVL --> CP
+    CP --> VER
+    VER --> BKP
+    VER --> BC
+    BC --> CLN
+    CLN --> FHC
+```
+
+> **SQL Server freeze window is ~1–2 seconds** regardless of disk size.
+> The copy and blockcommit phases happen entirely while the VM runs normally.
 
 ### How VSS Works with KVM
 
@@ -19,6 +65,63 @@ ryzen9 (Ubuntu Desktop - KVM Hypervisor)
 3. KVM takes a consistent disk snapshot (external snapshot).
 4. VSS thaws SQL Server I/O — normal operations resume.
 5. The snapshot can be mounted, backed up, or exported from the host.
+
+### Snapshot vs. Backup — What Is Actually Fast?
+
+> ⚠️ **Common misconception:** "Snapshot backup is fast."
+>
+> The **snapshot creation is instant** (~1–2 seconds). The **data copy is not** — and the
+> two are separate phases. Understanding this distinction is critical.
+
+| Phase | Duration | SQL Server state |
+|---|---|---|
+| VSS freeze | ~milliseconds | ❄️ I/O suspended |
+| Overlay file creation (the actual snapshot) | ~1 second | ❄️ I/O suspended |
+| VSS thaw — SQL Server resumes | ~milliseconds | ✅ Fully online |
+| Copy base images to backup destination | **Minutes to hours** (proportional to disk size) | ✅ Fully online |
+| Blockcommit + cleanup | 1–2 minutes | ✅ Fully online |
+
+The copy phase for AgHost-1A (112G across 3 disks, spinning disk at ~75 MB/s):
+
+| Drive | Size | Copy time (Run 3) |
+|---|---|---|
+| C (`vda`) | 37 G | ~8 min |
+| D (`vdb`) | 18 G | ~4 min |
+| E (`vdc`) | 57 G | ~14 min |
+| **Total** | **112 G** | **~28 min total** |
+
+**SQL Server was frozen for ~1–2 seconds.** The remaining 26+ minutes the VM ran
+normally and served queries while the copy happened in the background on the host.
+
+The copy speed depends entirely on storage throughput:
+
+| Storage type | Expected throughput | 112G copy time |
+|---|---|---|
+| Spinning disk (HDD) | ~75–120 MB/s | 15–25 min |
+| SSD (SATA) | ~400–500 MB/s | 4–5 min |
+| NVMe SSD | ~2,000–3,500 MB/s | < 1 min |
+| Network (1 GbE NFS) | ~100–110 MB/s | ~17 min |
+
+### Eliminating the Copy Step — `virsh backup-begin` (Option C)
+
+Instead of snapshot → copy → blockcommit, libvirt 7.2+ can stream directly to the backup
+destination with native incremental support:
+
+```bash
+# Full backup — streams directly to backup destination, no separate copy step
+virsh backup-begin AgHost-1A --backupxml backup-full.xml
+
+# Subsequent runs — only changed blocks since last checkpoint (much faster)
+virsh backup-begin AgHost-1A --backupxml backup-incremental.xml \
+  --checkpointxml checkpoint.xml
+```
+
+> **POC / Learning note — performance impact:**
+> A one-time full `virsh backup-begin` backup completes and leaves **no residual performance
+> impact** on the VM. The dirty bitmap tracking that enables incremental backups only causes
+> overhead when a **checkpoint is kept active** between backup runs.
+> For a single POC backup with no further incremental runs planned, simply do not create or
+> retain a checkpoint — the VM runs at full speed after the backup completes.
 
 ---
 
@@ -986,6 +1089,113 @@ A clean run should show **no Event ID 8194 errors** and ideally Event IDs `8229`
 
 ---
 
+## Step 4A — Selective Drive Snapshot (SQL Server Drives Only)
+
+By default, `virsh snapshot-create-as` snapshots **all disks** attached to the VM.
+For SQL Server, the OS drive (`vda` → `C:\`) rarely changes and is expensive to copy.
+You can exclude it and snapshot only the SQL data and log drives.
+
+### Drive Layout for AgHost-1A
+
+| virsh target | Windows drive | Contents | Include in backup? |
+|---|---|---|---|
+| `vda` | `C:\` | Windows OS, SQL binaries | ❌ No — OS drive, rarely needed |
+| `vdb` | `D:\` | SQL Server data files (`.mdf`, `.ndf`) | ✅ Yes |
+| `vdc` | `E:\` | SQL Server log files (`.ldf`) + native `.bak`/`.trn` backups | ✅ Yes |
+
+### How to Exclude a Disk — `--diskspec` with `snapshot=no`
+
+Pass a `--diskspec` entry for every disk. Set `snapshot=no` for disks to skip:
+
+```bash
+SNAP_NAME="AgHost-1A-sql-$(date +%Y%m%d-%H%M%S)"
+
+virsh snapshot-create-as AgHost-1A \
+  --name "$SNAP_NAME" \
+  --description "SQL-drives-only VSS snapshot" \
+  --diskspec vda,snapshot=no \
+  --diskspec vdb,snapshot=external \
+  --diskspec vdc,snapshot=external \
+  --disk-only --quiesce --atomic
+```
+
+> `--atomic` ensures that if the `vdb` or `vdc` snapshot fails, everything rolls back cleanly.
+> `snapshot=no` on `vda` tells libvirt to leave the C drive untouched — no overlay is created for it.
+
+### ✅ Verify Only SQL Drives Were Snapshotted
+
+```bash
+# Active disks — vda should still point to original .qcow2, vdb/vdc to overlays
+virsh domblklist AgHost-1A --details
+```
+
+Expected output — `vda` unchanged, `vdb` and `vdc` now point to overlays:
+```
+ Type   Device   Target   Source
+------------------------------------------------------------------------------------------
+ file   disk     vda      /vm-os/AgHost-1A_C_Drive.qcow2                     ← unchanged
+ file   disk     vdb      /vm-storage-01/AgHost-1A_D_Drive.AgHost-1A-sql-... ← overlay
+ file   disk     vdc      /vm-storage-01/AgHost-1A_E_Drive.AgHost-1A-sql-... ← overlay
+ file   cdrom    sda      -
+```
+
+```bash
+# Verify overlay backing files
+OVL_D=$(virsh domblklist AgHost-1A | awk '/vdb/ {print $2}')
+OVL_E=$(virsh domblklist AgHost-1A | awk '/vdc/ {print $2}')
+
+sudo qemu-img info -U "$OVL_D" | grep -E 'backing file:|disk size'
+sudo qemu-img info -U "$OVL_E" | grep -E 'backing file:|disk size'
+```
+
+Expected — each overlay lists the original `.qcow2` as backing file:
+```
+disk size: 328 KiB
+backing file: /vm-storage-01/AgHost-1A_D_Drive.qcow2
+disk size: 2.51 MiB
+backing file: /vm-storage-01/AgHost-1A_E_Drive.qcow2
+```
+
+### Copy, Verify, and Commit — SQL Drives Only
+
+```bash
+BACKUP_DIR="/vm-storage-02/libvirt-images"
+IMG_D="/vm-storage-01/AgHost-1A_D_Drive.qcow2"
+IMG_E="/vm-storage-01/AgHost-1A_E_Drive.qcow2"
+
+# Copy only D and E base images (C skipped — saves ~37G and ~8 minutes)
+sudo cp "$IMG_D" "${BACKUP_DIR}/AgHost-1A_D_Drive-${SNAP_NAME}.qcow2"
+sudo cp "$IMG_E" "${BACKUP_DIR}/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2"
+
+# Verify
+sudo qemu-img check "${BACKUP_DIR}/AgHost-1A_D_Drive-${SNAP_NAME}.qcow2" && echo "D: OK"
+sudo qemu-img check "${BACKUP_DIR}/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2" && echo "E: OK"
+
+# Blockcommit overlays back — only vdb and vdc have overlays
+virsh blockcommit AgHost-1A vdb --active --verbose --pivot
+virsh blockcommit AgHost-1A vdc --active --verbose --pivot
+
+# Cleanup
+virsh snapshot-delete AgHost-1A --snapshotname "$SNAP_NAME" --metadata
+sudo rm -f "$OVL_D" "$OVL_E"
+```
+
+### Comparison: Full vs. SQL-Only Snapshot
+
+| Aspect | All drives (vda+vdb+vdc) | SQL drives only (vdb+vdc) |
+|---|---|---|
+| Data copied | ~112G (37+18+57) | ~75G (18+57) |
+| Copy time (HDD) | ~28 min | ~18 min |
+| OS recovery | ✅ Possible from backup | ❌ Not possible |
+| SQL recovery | ✅ Yes | ✅ Yes |
+| Space saved per run | — | ~37G |
+| Use case | Full DR | SQL data recovery / log shipping practice |
+
+> **Recommendation for POC/practice:** Use SQL-drives-only (`vdb`+`vdc`).
+> Add `vda` only when you need full OS + application recovery from a single backup set.
+
+---
+
 ## Step 5 — Back Up the Snapshot Data (ryzen9)
 
 Now that a consistent snapshot exists, the **original base disk** (before the overlay) holds
@@ -1510,3 +1720,226 @@ Expected — SqlServerWriter state `[1] Stable`, no suspended requests, all data
 > ⚠️ **Prevent recurrence:** SQL Server will be left quiesced after every snapshot until the
 > **QEMU Guest Agent VSS Provider** issue is resolved (Step 1.2 of this guide).
 > Fix that service before taking another snapshot.
+
+---
+
+## Restore from VSS Snapshot Backup to Another SQL Server VM
+
+This section covers restoring the KVM snapshot backup (`.qcow2` files) to a separate
+SQL Server VM, keeping databases in `RESTORING` state (`WITH NORECOVERY`), then applying
+transaction log backups to roll forward to a desired point in time.
+
+### Architecture
+
+```
+ryzen9 (KVM Host)
+  ├── AgHost-1A        (Source — SQL Server, snapshot taken here)
+  ├── SqlRestore-VM    (Target — separate SQL Server VM for restore)
+  └── /vm-storage-02/  (Backup location — qcow2 files)
+```
+
+### Important: Why You Need Native SQL Backups Alongside the Snapshot
+
+A KVM VSS snapshot produces **raw MDF/LDF data files** in a consistent state.
+SQL Server's `RESTORE DATABASE ... WITH NORECOVERY` requires a `.bak` file — it cannot
+restore directly from raw MDF/LDF files. The snapshot alone is not enough.
+
+The correct workflow is:
+
+```
+AgHost-1A: BACKUP DATABASE → .bak file  ← point-in-time base
+AgHost-1A: BACKUP LOG      → .trn files ← roll-forward chain
+KVM VSS snapshot captures both .bak and .trn files at a consistent moment
+Mount snapshot → extract .bak + .trn → restore on SqlRestore-VM WITH NORECOVERY
+```
+
+### Step 1 — Prepare Source (AgHost-1A): Enable Full Recovery and Take Backups
+
+```sql
+-- Run on AgHost-1A (as sa or sysadmin)
+
+-- Ensure FULL recovery model (required for T-log restore chain)
+ALTER DATABASE [YourDatabase] SET RECOVERY FULL;
+GO
+
+-- Take a full database backup — this is the base for the restore
+BACKUP DATABASE [YourDatabase]
+TO DISK = N'E:\SQLBackups\YourDatabase_full.bak'
+WITH FORMAT, COMPRESSION, STATS = 10,
+     NAME = N'YourDatabase Full Backup';
+GO
+
+-- Take one or more T-log backups AFTER the full backup
+BACKUP LOG [YourDatabase]
+TO DISK = N'E:\SQLBackups\YourDatabase_log1.trn'
+WITH COMPRESSION, STATS = 10;
+GO
+```
+
+> The full backup and T-log files on `E:\` will be captured inside the VSS snapshot qcow2.
+
+### Step 2 — Take the VSS Snapshot (ryzen9)
+
+```bash
+SNAP_NAME="AgHost-1A-vss-$(date +%Y%m%d-%H%M%S)"
+virsh snapshot-create-as AgHost-1A \
+  --name "$SNAP_NAME" \
+  --description "VSS snapshot for restore POC" \
+  --disk-only --quiesce --atomic
+
+# Copy base images to backup location (E drive contains SQL backups)
+sudo cp /vm-storage-01/AgHost-1A_E_Drive.qcow2 \
+  /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2
+
+# Blockcommit and cleanup
+virsh blockcommit AgHost-1A vda --active --pivot
+virsh blockcommit AgHost-1A vdb --active --pivot
+virsh blockcommit AgHost-1A vdc --active --pivot
+virsh snapshot-delete AgHost-1A --snapshotname "$SNAP_NAME" --metadata
+sudo rm -f /vm-os/AgHost-1A_C_Drive.${SNAP_NAME} \
+           /vm-storage-01/AgHost-1A_D_Drive.${SNAP_NAME} \
+           /vm-storage-01/AgHost-1A_E_Drive.${SNAP_NAME}
+```
+
+### Step 3 — Mount the Backup E Drive and Extract SQL Backup Files (ryzen9)
+
+```bash
+# Load NBD module and attach the backup E drive qcow2
+sudo modprobe nbd max_part=8
+sudo qemu-nbd --connect=/dev/nbd0 \
+  /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2
+
+# List partitions inside the image
+sudo fdisk -l /dev/nbd0
+
+# Mount the NTFS data partition read-only (usually partition 1 for a data disk)
+sudo mkdir -p /mnt/aghost-e-backup
+sudo mount -o ro /dev/nbd0p1 /mnt/aghost-e-backup
+
+# Confirm SQL backup files are present
+ls -lh /mnt/aghost-e-backup/SQLBackups/
+```
+
+Expected:
+```
+YourDatabase_full.bak
+YourDatabase_log1.trn
+```
+
+### Step 4 — Copy SQL Backup Files to the Target VM (ryzen9)
+
+```bash
+# Find the IP of SqlRestore-VM
+virsh domifaddr SqlRestore-VM
+
+TARGET_IP="192.168.122.XXX"   # replace with actual IP
+
+# Copy the full backup and T-log files to the target VM
+scp /mnt/aghost-e-backup/SQLBackups/YourDatabase_full.bak \
+    /mnt/aghost-e-backup/SQLBackups/YourDatabase_log1.trn \
+    adwivedi@${TARGET_IP}:C:/SQLRestoreFiles/
+
+# Unmount and disconnect NBD when done
+sudo umount /mnt/aghost-e-backup
+sudo qemu-nbd --disconnect /dev/nbd0
+```
+
+> If SSH/SCP is not available on the target, share `/mnt/aghost-e-backup/SQLBackups/` via
+> a temporary Samba share or copy the files to a path accessible from both VMs.
+
+### Step 5 — Restore Full Backup WITH NORECOVERY on SqlRestore-VM
+
+Connect to the **target SQL Server** (SqlRestore-VM) and restore the full backup leaving
+the database in `RESTORING` state:
+
+```sql
+-- Run on SqlRestore-VM (as sa or sysadmin)
+
+RESTORE DATABASE [YourDatabase]
+FROM DISK = N'C:\SQLRestoreFiles\YourDatabase_full.bak'
+WITH
+    MOVE N'YourDatabase'      TO N'D:\SQLData\YourDatabase.mdf',
+    MOVE N'YourDatabase_log'  TO N'E:\SQLLogs\YourDatabase_ldf.ldf',
+    NORECOVERY,         -- leave in RESTORING — T-logs can still be applied
+    REPLACE,
+    STATS = 10;
+GO
+```
+
+Verify the database is in `RESTORING` state:
+
+```sql
+SELECT name, state_desc
+FROM sys.databases
+WHERE name = N'YourDatabase';
+-- Expected: state_desc = RESTORING
+```
+
+### Step 6 — Apply Transaction Log Backups (Roll Forward)
+
+Apply each T-log backup in **chronological order**. Use `NORECOVERY` for every log except
+the final one:
+
+```sql
+-- Apply first T-log backup — keep in RESTORING for further logs
+RESTORE LOG [YourDatabase]
+FROM DISK = N'C:\SQLRestoreFiles\YourDatabase_log1.trn'
+WITH NORECOVERY, STATS = 10;
+GO
+
+-- Apply second T-log (if available) — still NORECOVERY
+RESTORE LOG [YourDatabase]
+FROM DISK = N'C:\SQLRestoreFiles\YourDatabase_log2.trn'
+WITH NORECOVERY, STATS = 10;
+GO
+
+-- Continue for each subsequent .trn file in order...
+```
+
+> **Point-in-time restore:** Add `STOPAT = '2026-04-12T12:00:00'` to the final
+> `RESTORE LOG` statement to stop at an exact time within that log backup.
+
+### Step 7 — Bring the Database Online (Final Recovery)
+
+Once all desired T-logs have been applied, issue the recovery command:
+
+```sql
+-- Final step — recover the database and bring it ONLINE
+RESTORE DATABASE [YourDatabase] WITH RECOVERY;
+GO
+
+-- Verify
+SELECT name, state_desc, recovery_model_desc
+FROM sys.databases
+WHERE name = N'YourDatabase';
+-- Expected: state_desc = ONLINE
+```
+
+### Step 8 — Cleanup (ryzen9)
+
+```bash
+# Remove the extracted backup files (already safely on target VM)
+sudo rm -f /mnt/aghost-e-backup/SQLBackups/YourDatabase_full.bak \
+           /mnt/aghost-e-backup/SQLBackups/YourDatabase_log1.trn
+
+# Remove the backup qcow2 if disk space is needed (keep if further restores planned)
+sudo rm -f /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2
+```
+
+### Restore Summary
+
+| Step | Location | Action |
+|---|---|---|
+| 1 | AgHost-1A (SQL) | Set FULL recovery; take full `.bak` + `.trn` backups |
+| 2 | ryzen9 (KVM host) | VSS snapshot → copy E drive qcow2 to `/vm-storage-02/` |
+| 3 | ryzen9 (KVM host) | Mount qcow2 via `qemu-nbd`; locate backup files |
+| 4 | ryzen9 (KVM host) | SCP `.bak` + `.trn` files to SqlRestore-VM |
+| 5 | SqlRestore-VM (SQL) | `RESTORE DATABASE ... WITH NORECOVERY` |
+| 6 | SqlRestore-VM (SQL) | `RESTORE LOG ... WITH NORECOVERY` (repeat per log) |
+| 7 | SqlRestore-VM (SQL) | `RESTORE DATABASE ... WITH RECOVERY` → ONLINE |
+| 8 | ryzen9 (KVM host) | Unmount NBD; optionally delete backup qcow2 |
+
+> **Key takeaway:** The VSS snapshot ensures the full backup and T-log files captured inside
+> the qcow2 are application-consistent. The `WITH NORECOVERY` chain lets you roll the
+> database forward through any number of T-log backups before bringing it online — useful
+> for point-in-time recovery drills, log shipping setup, and DR practice.
