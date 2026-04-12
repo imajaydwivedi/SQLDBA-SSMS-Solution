@@ -1763,95 +1763,143 @@ sudo rm -f /vm-storage-01/AgHost-1A_E_Drive.${SNAP_NAME}
 
 ### Step 3 — Attach Backup qcow2 to SqlPoc as T:\ (ryzen9)
 
+> ⚠️ **Verified finding:** `virsh attach-disk --readonly` flag is not supported.
+> Use `virsh attach-device` with a disk XML file that includes `<readonly/>`.
+
 ```bash
 BACKUP_QCOW2="/vm-storage-02/libvirt-images/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2"
 
-# Hot-attach the backup qcow2 to SqlPoc as a new VirtIO disk (read-only)
-virsh attach-disk SqlPoc \
-  "$BACKUP_QCOW2" \
-  vdd \
-  --driver qemu \
-  --subdriver qcow2 \
-  --targetbus virtio \
-  --readonly \
-  --live
+# Create attach XML with <readonly/> — virsh attach-disk does not support --readonly
+cat > /tmp/attach-vdd.xml << EOF
+<disk type='file' device='disk'>
+  <driver name='qemu' type='qcow2'/>
+  <source file='${BACKUP_QCOW2}'/>
+  <target dev='vdd' bus='virtio'/>
+  <readonly/>
+</disk>
+EOF
 
-# Confirm the disk is attached
-virsh domblklist SqlPoc --details
+# Hot-attach to SqlPoc (read-only, live)
+sudo virsh attach-device SqlPoc /tmp/attach-vdd.xml --live
+
+# Confirm vdd is listed
+sudo virsh domblklist SqlPoc --details
 ```
 
-Expected — `vdd` now shows the backup qcow2:
+Expected:
 ```
  Type   Device   Target   Source
-----------------------------------------------------------------------
- file   disk     vda      /vm-os/SqlPoc_C_Drive.qcow2
- ...
- file   disk     vdd      /vm-storage-02/.../AgHost-1A_E_Drive-<snap>.qcow2
+---------------------------------------------------------------------------------
+ file   disk     vda      /vm-os/SqlPoc.qcow2
+ file   disk     vdb      /vm-storage-02/SqlPoc_D_Drive.qcow2
+ file   disk     vdc      /vm-storage-02/SqlPoc_E_Drive.qcow2
+ file   disk     vdd      /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-<snap>.qcow2
 ```
 
 ### Step 4 — Bring T:\ Online in Windows on SqlPoc
 
 On **SqlPoc** (PowerShell as Administrator):
 
+> ⚠️ **Verified finding:** Windows auto-assigns a drive letter (e.g. `H:\`) when the disk
+> comes online. Remove it first, then assign `T:\` explicitly.
+
 ```powershell
-# Find the new offline disk
-Get-Disk | Where-Object OperationalStatus -eq 'Offline' |
-    Select-Object Number, Size, PartitionStyle
+# Find the new disk — it will be Offline (read-only from hypervisor)
+Get-Disk | Select Number, OperationalStatus, IsReadOnly, Size, PartitionStyle
 
-# Bring online as read-only (attached --readonly from hypervisor)
-$disk = Get-Disk | Where-Object OperationalStatus -eq 'Offline' | Select-Object -First 1
-Set-Disk -Number $disk.Number -IsOffline $false
-Set-Disk -Number $disk.Number -IsReadOnly $true
+# Bring online (disk is already read-only via hypervisor <readonly/>)
+$diskNum = (Get-Disk | Where-Object { $_.OperationalStatus -eq 'Offline' -and $_.Size -gt 50GB } |
+            Select-Object -First 1).Number
+Set-Disk -Number $diskNum -IsOffline $false
 
-# Assign T:\ drive letter
-$part = Get-Partition -DiskNumber $disk.Number | Where-Object Type -ne 'Reserved'
-$part | Add-PartitionAccessPath -AccessPath "T:\"
+# Remove any auto-assigned drive letter (Windows may assign H:\ automatically)
+$part = Get-Partition -DiskNumber $diskNum | Where-Object { $_.DriveLetter -and $_.Size -gt 1GB }
+if ($part.DriveLetter) {
+    Remove-PartitionAccessPath -DiskNumber $diskNum -PartitionNumber $part.PartitionNumber `
+        -AccessPath "$($part.DriveLetter):\"
+}
 
-# Verify — should see MDF/LDF files and TLogBackups folder
+# Assign T:\
+Add-PartitionAccessPath -DiskNumber $diskNum -PartitionNumber $part.PartitionNumber `
+    -AccessPath "T:\"
+
+# Verify T:\ is accessible and shows AgHost-1A SQL files
 Get-PSDrive T
-Get-ChildItem T:\ -Recurse -Depth 1 | Select-Object FullName, Length
+Get-ChildItem "T:\MSSQL15.MSSQLSERVER\MSSQL\DATA\" | Select Name | Sort-Object Name
 ```
 
-Expected — MDF/LDF files and `TLogBackups` folder visible on `T:\`.
+Expected — MDF/LDF files for all databases visible under `T:\MSSQL15.MSSQLSERVER\MSSQL\DATA\`.
 
 ### Step 5 — Copy MDF/LDF Files from T:\ to SqlPoc Local Drives
 
-The snapshot raw data files are the database at the VSS-consistent point.
-Copy them off T:\ so SqlPoc's SQL Server can attach them locally:
+```powershell
+# Create target directory on SqlPoc (SQL Server default data path)
+New-Item -ItemType Directory -Force "E:\MSSQL\Data"
+
+# AgHost-1A SQL files are at this path on the snapshot disk:
+$src = "T:\MSSQL15.MSSQLSERVER\MSSQL\DATA"
+$dst = "E:\MSSQL\Data"
+
+# Copy MDF/LDF for each user database (adjust list as needed)
+$dbs = @('CDCDemo', 'Db2', 'DBA', 'Facebook')   # excludes StackOverflow2013 (too large for POC)
+foreach ($db in $dbs) {
+    Write-Host "[$(Get-Date -f HH:mm:ss)] Copying $db ..."
+    Copy-Item "$src\$db.mdf"     "$dst\$db.mdf"
+    Copy-Item "$src\${db}_log.ldf" "$dst\${db}_log.ldf"
+}
+
+# Confirm copies
+Get-ChildItem $dst | Select Name, @{N='SizeMB';E={[math]::Round($_.Length/1MB,1)}} |
+    Sort-Object Name | Format-Table
+```
+
+> T:\ can now be removed — all database files are on SqlPoc's local `E:\MSSQL\Data\`.
+
+### Step 6 — Attach the Databases and Let SQL Server Run Crash Recovery
 
 ```powershell
-# Create target folders if they don't exist
-New-Item -ItemType Directory -Force -Path "E:\SQLData"
-New-Item -ItemType Directory -Force -Path "E:\SQLLogs"
+# PowerShell loop on SqlPoc — FOR ATTACH each user database
+$dbs = [ordered]@{
+    'CDCDemo'  = @('E:\MSSQL\Data\CDCDemo.mdf',  'E:\MSSQL\Data\CDCDemo_log.ldf')
+    'Db2'      = @('E:\MSSQL\Data\Db2.mdf',      'E:\MSSQL\Data\Db2_log.ldf')
+    'DBA'      = @('E:\MSSQL\Data\DBA.mdf',       'E:\MSSQL\Data\DBA_log.ldf')
+    'Facebook' = @('E:\MSSQL\Data\Facebook.mdf', 'E:\MSSQL\Data\Facebook_log.ldf')
+}
+foreach ($db in $dbs.Keys) {
+    $f0 = $dbs[$db][0]; $f1 = $dbs[$db][1]
+    $sql = "CREATE DATABASE [$db] ON (FILENAME=N'$f0'),(FILENAME=N'$f1') FOR ATTACH;"
+    Write-Host "[$(Get-Date -f HH:mm:ss)] Attaching $db ..."
+    try {
+        Invoke-Sqlcmd -ServerInstance '.' -Query $sql -QueryTimeout 120 -ErrorAction Stop
+        Write-Host "  OK: $db"
+    } catch { Write-Host "  FAIL $db : $($_.Exception.Message)" }
+}
 
-# Copy each database's data and log files from T:\ to local drives
-Copy-Item "T:\SQLData\YourDatabase.mdf"     "E:\SQLData\YourDatabase.mdf"
-Copy-Item "T:\SQLData\YourDatabase_log.ldf" "E:\SQLLogs\YourDatabase_log.ldf"
-
-# Repeat for each user database
+# Verify all ONLINE
+Invoke-Sqlcmd -ServerInstance '.' -Query "
+SELECT name, state_desc FROM sys.databases
+WHERE name NOT IN ('master','model','msdb','tempdb') ORDER BY name;"
 ```
 
-> T:\ can now be removed — all necessary files are on SqlPoc's local drives.
-
-### Step 6 — Attach the Database and Let SQL Server Run Crash Recovery
-
-SQL Server opens the copied MDF/LDF, runs crash recovery (rolls back any uncommitted
-transactions from the freeze point), and brings the database **ONLINE**:
-
-```sql
--- Run on SqlPoc SQL Server instance
-
--- Attach the database from the copied MDF/LDF files
-CREATE DATABASE [YourDatabase]
-ON (FILENAME = N'E:\SQLData\YourDatabase.mdf'),
-   (FILENAME = N'E:\SQLLogs\YourDatabase_log.ldf')
-FOR ATTACH;
-GO
-
--- Verify it came ONLINE
-SELECT name, state_desc FROM sys.databases WHERE name = N'YourDatabase';
--- Expected: ONLINE  (SQL Server completed crash recovery at the snapshot LSN)
-```
+> **TDE databases:** If a database was encrypted with TDE on the source server, `FOR ATTACH`
+> will fail with *"Cannot find server certificate with thumbprint"*. Export the certificate
+> and private key from AgHost-1A and import to SqlPoc before retrying:
+>
+> ```sql
+> -- On AgHost-1A: export TDE certificate
+> BACKUP CERTIFICATE [AGHOST-1A__Certificate]
+> TO FILE = N'C:\Temp\AgHost1A_TDE.cer'
+> WITH PRIVATE KEY (FILE = N'C:\Temp\AgHost1A_TDE.pvk',
+>                   ENCRYPTION BY PASSWORD = N'YourExportPwd!');
+>
+> -- On SqlPoc: import TDE certificate (create master key first if needed)
+> CREATE MASTER KEY ENCRYPTION BY PASSWORD = N'MasterKeyPa55!';
+> CREATE CERTIFICATE [AGHOST-1A__Certificate]
+> FROM FILE = N'C:\Temp\AgHost1A_TDE.cer'
+> WITH PRIVATE KEY (FILE = N'C:\Temp\AgHost1A_TDE.pvk',
+>                   DECRYPTION BY PASSWORD = N'YourExportPwd!');
+> -- Now retry FOR ATTACH for the TDE database
+> ```
 
 ### Step 7 — Take Tail-Log Backup WITH NORECOVERY (The Bridge Step)
 
@@ -1876,63 +1924,63 @@ SELECT name, state_desc FROM sys.databases WHERE name = N'YourDatabase';
 > subsequent `RESTORE LOG` commands will fail. The tail-log is the bridge between the
 > snapshot (crash-recovered, ONLINE) and the T-log chain (RESTORING).
 
-### Step 8 — Apply T-Log Backups from AgHost-1A (PITR Roll Forward)
+### Step 8 — Copy T-Log Files from AgHost-1A and Apply (PITR Roll Forward)
 
-Copy the `.trn` files from AgHost-1A's `E:\TLogBackups\` to SqlPoc's `E:\TLogBackups\`.
-Only files with a timestamp **after the snapshot** are relevant.
+T-log files live on AgHost-1A's `E:\TLogBackups\`. Since both VMs are domain-joined,
+SqlPoc can copy them directly over SMB from AgHost-1A's admin share.
 
 > ⚠️ **Critical: use `StartsWith` for file filtering, not substring match.**
-> Substring match (`"Sales" -in $file`) hits "Sales", "SalesArchive", "SalesTemp" —
-> applying wrong T-logs to the wrong database causes **silent data corruption** (B4).
-> Always use `$file.Name.ToLower().StartsWith($db.ToLower() + '_')`.
+> `"Sales" -in $file` hits "SalesArchive" and "SalesTemp" → wrong T-logs applied →
+> **silent data corruption**. Always use `$file.Name.ToLower().StartsWith($db.ToLower() + '_')`.
+
+> ⚠️ **DBA note:** If a database was in `SIMPLE` recovery before the snapshot, there is
+> no log chain from AgHost-1A to apply. Take a `BACKUP DATABASE` on SqlPoc (after FOR ATTACH)
+> to establish a local baseline, then take `BACKUP LOG WITH NORECOVERY` for the tail-log.
 
 ```powershell
 # Run on SqlPoc (PowerShell as Administrator)
 
-# --- Configuration ---
-$TargetTime  = '2026-04-12T13:25:00'   # PITR target — set to desired point in time
-$TLogDir     = 'E:\TLogBackups'
-$Databases   = @('YourDatabase', 'AnotherDB')   # list all user databases to restore
+$TargetTime  = '2026-04-12T18:00:00'           # PITR target timestamp
+$SrcTLogDir  = '\\AGHOST-1A\E$\TLogBackups'    # AgHost-1A admin share (domain auth)
+$DstTLogDir  = 'E:\TLogBackups'
+$Databases   = @('CDCDemo', 'Db2', 'Facebook') # databases in FULL recovery before snapshot
 
-# --- T-log application loop ---
+# Step 8a: Copy T-log files from AgHost-1A to SqlPoc
+New-Item -ItemType Directory -Force $DstTLogDir | Out-Null
+if (Test-Path $SrcTLogDir) {
+    $files = Get-ChildItem $SrcTLogDir -Filter '*.trn'
+    Write-Host "Copying $($files.Count) T-log file(s) from AgHost-1A..."
+    foreach ($f in $files) { Copy-Item $f.FullName $DstTLogDir -Force; Write-Host "  $($f.Name)" }
+} else {
+    Write-Warning "SMB path $SrcTLogDir not reachable — copy .trn files manually to $DstTLogDir"
+}
+
+# Step 8b: Apply T-logs per DB with STOPAT (safe StartsWith filter)
 foreach ($db in $Databases) {
-
-    # SAFE filter: startswith(db + '_') — avoids substring match bug (B4)
-    $tlogFiles = Get-ChildItem -Path $TLogDir -Filter '*.trn' |
+    $tlogFiles = Get-ChildItem $DstTLogDir -Filter '*.trn' |
                  Where-Object { $_.Name.ToLower().StartsWith($db.ToLower() + '_') } |
-                 Sort-Object Name   # chronological order by filename timestamp
+                 Sort-Object Name
 
-    if ($tlogFiles.Count -eq 0) {
-        Write-Warning "[$db] No T-log files found in $TLogDir — skipping"
-        continue
-    }
-
-    Write-Host "[$db] Applying $($tlogFiles.Count) T-log file(s)..."
+    if ($tlogFiles.Count -eq 0) { Write-Warning "[$db] No T-logs — skipping"; continue }
+    Write-Host "[$db] Applying $($tlogFiles.Count) T-log(s)..."
 
     foreach ($tlog in $tlogFiles) {
-        $sql = @"
-RESTORE LOG [$db]
-FROM DISK = N'$($tlog.FullName)'
-WITH NORECOVERY, STOPAT = '$TargetTime', STATS = 10;
-"@
         try {
-            Invoke-Sqlcmd -ServerInstance '.' -Query $sql `
-                          -QueryTimeout 600 -ErrorAction Stop
+            Invoke-Sqlcmd -ServerInstance '.' -QueryTimeout 600 -ErrorAction Stop -Query "
+                RESTORE LOG [$db] FROM DISK = N'$($tlog.FullName)'
+                WITH NORECOVERY, STOPAT = '$TargetTime', STATS = 10;"
             Write-Host "  [OK] $($tlog.Name)"
-        }
-        catch {
-            # Error handling — B9 in production has none; we stop explicitly
+        } catch {
             Write-Error "  [FAIL] $($tlog.Name): $_"
-            Write-Error "  [$db] T-log chain broken — do NOT recover this database"
+            Write-Error "  [$db] T-log chain broken — do NOT recover this DB"
             break
         }
     }
 }
 ```
 
-> **`STOPAT` on every file** — SQL Server silently stops applying records at the target
-> timestamp within whichever log file contains it, and ignores subsequent files.
-> This is safe to set on every `RESTORE LOG`, not just the last one.
+> **`STOPAT` on every file** — SQL Server stops at the target timestamp within whichever
+> log file contains it and ignores subsequent files. Safe to specify on every `RESTORE LOG`.
 
 ### Step 9 — Bring All Databases Online in Parallel (Final Recovery)
 
@@ -2061,16 +2109,20 @@ echo "Backup qcow2 deleted"
 
 ### Common Pitfalls to Avoid
 
-The following are real issues seen in SQL Server VSS restore implementations.
-This POC explicitly guards against all of them:
+The following are real issues — some discovered during this POC's E2E test run,
+some from known SQL Server VSS restore patterns.
 
-| Bug | Production code | Problem | POC fix |
+| # | Issue | Problem | Fix |
 |---|---|---|---|
-| **B1** | `time.sleep(10*60)`, `Start-Sleep -Seconds 90` | Fixed sleeps — too short on slow systems, wasteful on fast | `Wait-Job -Timeout 600` + poll loop |
-| **B4** ⚠️ | `filter(lambda a: db in a, txn_logs)` | Substring match — `"Sales"` matches `"SalesArchive_*.trn"` and `"SalesTemp_*.trn"` → **wrong T-logs applied → silent data corruption** | `$file.Name.ToLower().StartsWith($db.ToLower() + '_')` |
-| **B5** | `ConvertFRom-Json` | Typo — works only due to PowerShell case-insensitivity | Not applicable (using `Invoke-Sqlcmd`) |
-| **B9** | No try/catch on `RESTORE LOG` | Silent T-log failures leave DB in unknown broken state | `try/catch` + `break` + explicit error per file |
+| **P1** | `virsh attach-disk --readonly` | Flag not supported — returns error | Use `virsh attach-device` with XML containing `<readonly/>` |
+| **P2** | Windows auto-assigns drive letter | Disk comes online as `H:\` instead of `T:\` | Remove auto-assigned letter with `Remove-PartitionAccessPath`, then assign `T:\` |
+| **P3** | TDE database: `FOR ATTACH` fails | *"Cannot find server certificate with thumbprint"* | Export cert + private key from source; import on SqlPoc before attaching |
+| **P4** | DB was SIMPLE recovery before snapshot | `BACKUP LOG WITH NORECOVERY` fails — *"no current database backup"* | Take `BACKUP DATABASE` on SqlPoc (after FOR ATTACH) to establish local baseline |
+| **P5** | WinRM 413 for large file transfer | Base64-encoded T-log files (>5MB) exceed WinRM envelope limit | Copy T-logs via SMB admin share (`\\AGHOST-1A\E$\TLogBackups`) |
+| **B1** | Fixed sleep durations | Too short on slow systems, wasteful on fast | `Wait-Job -Timeout 600` + poll loop |
+| **B4** ⚠️ | `"Sales" -in $filename` substring match | Matches "SalesArchive" and "SalesTemp" → **wrong T-logs → silent data corruption** | `$file.Name.ToLower().StartsWith($db.ToLower() + '_')` |
+| **B9** | No try/catch on `RESTORE LOG` | Silent T-log failures leave DB in broken unknown state | `try/catch` + `break` + explicit error per file |
 
-> **B4 is the most dangerous** — silent data corruption from wrong T-logs applied to wrong
-> databases can go undetected until a restore is actually needed in a crisis.
+> **B4 (P5 in T-log context) is the most dangerous** — wrong T-logs applied to the
+> wrong database causes silent data corruption that may go undetected for months.
 > Always use `StartsWith(db + '_')`. Never use substring/contains match on database name.
