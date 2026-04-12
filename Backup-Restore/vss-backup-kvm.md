@@ -1908,47 +1908,150 @@ SELECT name, state_desc FROM sys.databases WHERE name = N'YourDatabase';
 > subsequent `RESTORE LOG` commands will fail. The tail-log is the bridge between the
 > snapshot (crash-recovered, ONLINE) and the T-log chain (RESTORING).
 
-### Step 8 — Apply T-Log Backups from AgHost-1A (Roll Forward)
+### Step 8 — Apply T-Log Backups from AgHost-1A (PITR Roll Forward)
 
-Copy the `.trn` files from AgHost-1A's `E:\TLogBackups\` to SqlPoc, then apply in
-**chronological order**. Only T-logs taken **after the snapshot timestamp** are relevant:
+Copy the `.trn` files from AgHost-1A's `E:\TLogBackups\` to SqlPoc's `E:\TLogBackups\`.
+Only files with a timestamp **after the snapshot** are relevant.
 
-```sql
--- Apply each T-log in order — NORECOVERY for all but the final one
+> ⚠️ **Critical: use `StartsWith` for file filtering, not substring match.**
+> Substring match (`"Sales" -in $file`) hits "Sales", "SalesArchive", "SalesTemp" —
+> applying wrong T-logs to the wrong database causes **silent data corruption** (B4).
+> Always use `$file.Name.ToLower().StartsWith($db.ToLower() + '_')`.
 
-RESTORE LOG [YourDatabase]
-FROM DISK = N'E:\TLogBackups\YourDatabase_20260412_1300.trn'
-WITH NORECOVERY, STATS = 10;
-GO
+```powershell
+# Run on SqlPoc (PowerShell as Administrator)
 
-RESTORE LOG [YourDatabase]
-FROM DISK = N'E:\TLogBackups\YourDatabase_20260412_1315.trn'
-WITH NORECOVERY, STATS = 10;
-GO
+# --- Configuration ---
+$TargetTime  = '2026-04-12T13:25:00'   # PITR target — set to desired point in time
+$TLogDir     = 'E:\TLogBackups'
+$Databases   = @('YourDatabase', 'AnotherDB')   # list all user databases to restore
 
--- Point-in-time: stop within a specific log file using STOPAT
-RESTORE LOG [YourDatabase]
-FROM DISK = N'E:\TLogBackups\YourDatabase_20260412_1330.trn'
-WITH NORECOVERY, STOPAT = '2026-04-12T13:25:00', STATS = 10;
-GO
+# --- T-log application loop ---
+foreach ($db in $Databases) {
+
+    # SAFE filter: startswith(db + '_') — avoids substring match bug (B4)
+    $tlogFiles = Get-ChildItem -Path $TLogDir -Filter '*.trn' |
+                 Where-Object { $_.Name.ToLower().StartsWith($db.ToLower() + '_') } |
+                 Sort-Object Name   # chronological order by filename timestamp
+
+    if ($tlogFiles.Count -eq 0) {
+        Write-Warning "[$db] No T-log files found in $TLogDir — skipping"
+        continue
+    }
+
+    Write-Host "[$db] Applying $($tlogFiles.Count) T-log file(s)..."
+
+    foreach ($tlog in $tlogFiles) {
+        $sql = @"
+RESTORE LOG [$db]
+FROM DISK = N'$($tlog.FullName)'
+WITH NORECOVERY, STOPAT = '$TargetTime', STATS = 10;
+"@
+        try {
+            Invoke-Sqlcmd -ServerInstance '.' -Query $sql `
+                          -QueryTimeout 600 -ErrorAction Stop
+            Write-Host "  [OK] $($tlog.Name)"
+        }
+        catch {
+            # Error handling — B9 in production has none; we stop explicitly
+            Write-Error "  [FAIL] $($tlog.Name): $_"
+            Write-Error "  [$db] T-log chain broken — do NOT recover this database"
+            break
+        }
+    }
+}
 ```
 
-### Step 9 — Bring Databases Online (Final Recovery)
+> **`STOPAT` on every file** — SQL Server silently stops applying records at the target
+> timestamp within whichever log file contains it, and ignores subsequent files.
+> This is safe to set on every `RESTORE LOG`, not just the last one.
 
-```sql
--- Recover the database — no more T-logs will be applied
-RESTORE DATABASE [YourDatabase] WITH RECOVERY;
-GO
+### Step 9 — Bring All Databases Online in Parallel (Final Recovery)
 
--- Verify
+```powershell
+# Run on SqlPoc — parallel recovery using background jobs (mirrors Start-Job pattern)
+
+$Databases = @('YourDatabase', 'AnotherDB')   # same list as Step 8
+
+$jobs = foreach ($db in $Databases) {
+    Start-Job -ScriptBlock {
+        param($dbName)
+        $sql = "RESTORE DATABASE [$dbName] WITH RECOVERY;"
+        try {
+            Invoke-Sqlcmd -ServerInstance '.' -Query $sql `
+                          -QueryTimeout 300 -ErrorAction Stop
+            Write-Host "[$dbName] ONLINE"
+        }
+        catch {
+            Write-Error "[$dbName] Recovery failed: $_"
+        }
+    } -ArgumentList $db
+
+    Start-Sleep -Seconds 3   # stagger job starts
+}
+
+# Wait for all jobs — use a generous timeout (not 30s like B1 in production)
+$jobs | Wait-Job -Timeout 600 | Receive-Job
+$jobs | Remove-Job
+
+# Verify all databases are ONLINE
+Invoke-Sqlcmd -ServerInstance '.' -Query @"
 SELECT name, state_desc, recovery_model_desc
 FROM sys.databases
 WHERE name NOT IN ('master','model','msdb','tempdb')
 ORDER BY name;
--- Expected: state_desc = ONLINE
+"@
 ```
 
-### Step 10 — Remove T:\ and Detach the Backup qcow2
+### Step 10 — Post-Restore: Fix Orphan Users, Sync Logins, Rename Instance
+
+After databases are ONLINE, logins from the source server (AgHost-1A) will not exist on
+SqlPoc, leaving database users as orphans. Fix before handing the instance to consumers:
+
+```sql
+-- Run on SqlPoc SQL Server
+
+-- 1. Identify orphan users in each restored database
+USE [YourDatabase];
+GO
+EXEC sp_change_users_login 'Report';
+GO
+
+-- 2. Fix orphan users — re-map to an existing SqlPoc login by the same name
+--    (if the login exists on SqlPoc already)
+EXEC sp_change_users_login 'Auto_Fix', 'YourLoginName';
+GO
+
+-- 3. If the login does NOT exist on SqlPoc, create it first then re-map
+CREATE LOGIN [YourLoginName] WITH PASSWORD = 'TempPassword!23',
+    DEFAULT_DATABASE = [YourDatabase], CHECK_POLICY = OFF;
+GO
+EXEC sp_change_users_login 'Update_One', 'YourLoginName', 'YourLoginName';
+GO
+```
+
+```powershell
+-- 4. Sync logins from AgHost-1A to SqlPoc (use sp_help_revlogin or dbatools)
+-- Using dbatools (recommended):
+Install-Module dbatools -Scope CurrentUser -Force
+
+Copy-DbaLogin -Source 'AgHost-1A' -Destination 'SqlPoc' -ExcludeSystemLogins
+```
+
+```sql
+-- 5. Optionally rename the SQL Server instance name visible inside SQL
+--    (useful when SqlPoc has a different Windows hostname than AgHost-1A)
+SELECT @@SERVERNAME AS CurrentName;
+
+-- If it shows AgHost-1A instead of SqlPoc:
+EXEC sp_dropserver 'AgHost-1A';
+GO
+EXEC sp_addserver 'SqlPoc', 'local';
+GO
+-- Restart SQL Server service for the rename to take effect
+```
+
+### Step 11 — Remove T:\ and Detach the Backup qcow2
 
 **On SqlPoc (PowerShell) — remove drive letter and take disk offline:**
 
@@ -1970,22 +2073,35 @@ sudo rm -f /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2
 echo "Backup qcow2 deleted"
 ```
 
-### Restore Summary
+### Restore + PITR Summary
 
 | Step | Where | Action |
 |---|---|---|
-| 1 | AgHost-1A (SQL) | Ensure `FULL` recovery; T-log backups running on schedule |
+| 1 | AgHost-1A (SQL) | Ensure `FULL` recovery; T-log backups scheduled (`E:\TLogBackups\`) |
 | 2 | ryzen9 | E:\ only VSS snapshot → copy qcow2 to `/vm-storage-02/` |
 | 3 | ryzen9 | `virsh attach-disk SqlPoc ... vdd --readonly --live` |
 | 4 | SqlPoc (PowerShell) | Bring disk online read-only → assign `T:\` |
 | 5 | SqlPoc (PowerShell) | Copy MDF/LDF from `T:\` to local `E:\SQLData\` / `E:\SQLLogs\` |
 | 6 | SqlPoc (SQL) | `CREATE DATABASE ... FOR ATTACH` → crash recovery → **ONLINE** |
-| 7 | SqlPoc (SQL) | `BACKUP LOG WITH NORECOVERY` (tail-log) → **RESTORING** ← key step |
-| 8 | SqlPoc (SQL) | `RESTORE LOG ... WITH NORECOVERY` per `.trn` (roll forward) |
-| 9 | SqlPoc (SQL) | `RESTORE DATABASE WITH RECOVERY` → **ONLINE** at desired LSN |
-| 10 | SqlPoc + ryzen9 | Remove `T:\` → offline disk → `virsh detach-disk` → delete qcow2 |
+| 7 | SqlPoc (SQL) | `BACKUP LOG WITH NORECOVERY` (tail-log) → **RESTORING** ⬅ key step |
+| 8 | SqlPoc (PowerShell) | Filter T-logs per DB with `StartsWith` → `RESTORE LOG WITH STOPAT` |
+| 9 | SqlPoc (PowerShell) | Parallel `RESTORE DATABASE WITH RECOVERY` per DB → **ONLINE** |
+| 10 | SqlPoc (SQL) | Fix orphan users, sync logins, rename instance |
+| 11 | SqlPoc + ryzen9 | Remove `T:\` → offline disk → `virsh detach-disk` → delete qcow2 |
 
-> **Key insight:** No `BACKUP DATABASE` is ever taken on AgHost-1A. The VSS snapshot IS
-> the full backup. The tail-log backup in Step 7 is what bridges the crash-recovered
-> (ONLINE) database into RESTORING state so the T-log chain can be applied — exactly
-> the same mechanism used in production EC2/EBS VSS restore workflows.
+---
+
+### Production Bugs to Avoid in This POC
+
+The following bugs are from the production EC2 implementation. This POC avoids all of them:
+
+| Bug | Production code | Problem | POC fix |
+|---|---|---|---|
+| **B1** | `time.sleep(10*60)`, `Start-Sleep -Seconds 90` | Fixed sleeps — too short on slow systems, wasteful on fast | `Wait-Job -Timeout 600` + poll loop |
+| **B4** ⚠️ | `filter(lambda a: db in a, txn_logs)` | Substring match — `"Sales"` matches `"SalesArchive_*.trn"` and `"SalesTemp_*.trn"` → **wrong T-logs applied → silent data corruption** | `$file.Name.ToLower().StartsWith($db.ToLower() + '_')` |
+| **B5** | `ConvertFRom-Json` | Typo — works only due to PowerShell case-insensitivity | Not applicable (using `Invoke-Sqlcmd`) |
+| **B9** | No try/catch on `RESTORE LOG` | Silent T-log failures leave DB in unknown broken state | `try/catch` + `break` + explicit error per file |
+
+> **B4 is the most dangerous** — silent data corruption from wrong T-logs applied to wrong
+> databases can go undetected until a restore is actually needed in a crisis.
+> Always use `StartsWith(db + '_')`. Never use substring/contains match on database name.
