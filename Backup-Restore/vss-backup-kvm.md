@@ -20,40 +20,7 @@ ryzen9 (Ubuntu Desktop - KVM Hypervisor)
 
 ### End-to-End Flow
 
-```mermaid
-flowchart TD
-    subgraph HOST["ryzen9 — KVM Hypervisor"]
-        direction TB
-        PF["🔍 Pre-flight Checks\n• VM running?\n• Guest agent reachable?\n• Disk images healthy?"]
-        SNAP["📸 virsh snapshot-create-as\n--disk-only --quiesce --atomic"]
-        OVL["Overlay files created\n(new writes go here)"]
-        CP["📂 Copy base images\nto /vm-storage-02/\n(VM runs normally)"]
-        VER["✅ Verify backup\nqemu-img check"]
-        BC["🔀 Blockcommit overlays\nback into base images\n+ pivot active disk"]
-        CLN["🗑️ Cleanup\nDelete snapshot metadata\nRemove overlay files"]
-        FHC["🩺 Final health check\nqemu-img check on live disks"]
-        BKP[("💾 Backup .qcow2 files\n/vm-storage-02/libvirt-images/")]
-    end
-
-    subgraph VM["AgHost-1A — Windows Server VM"]
-        direction TB
-        SQL["🗄️ SQL Server\n(running normally)"]
-        VSS_FREEZE["❄️ VSS Freeze\nSQL Writer freezes I/O\n~1–2 seconds"]
-        VSS_THAW["✅ VSS Thaw\nSQL Server resumes\nI/O unfrozen"]
-    end
-
-    PF --> SNAP
-    SNAP -->|"qemu-guest-agent\n--quiesce signal"| VSS_FREEZE
-    VSS_FREEZE --> OVL
-    OVL -->|"Snapshot complete\nthaw signal"| VSS_THAW
-    VSS_THAW --> SQL
-    OVL --> CP
-    CP --> VER
-    VER --> BKP
-    VER --> BC
-    BC --> CLN
-    CLN --> FHC
-```
+![VSS Snapshot Backup — End-to-End Flow](../images/vss-backup-flow.png)
 
 > **SQL Server freeze window is ~1–2 seconds** regardless of disk size.
 > The copy and blockcommit phases happen entirely while the VM runs normally.
