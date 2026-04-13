@@ -1666,44 +1666,129 @@ Expected — SqlServerWriter state `[1] Stable`, no suspended requests, all data
 
 ## Restore from VSS Snapshot Backup to SqlPoc
 
-The VSS snapshot qcow2 **is** the full backup — no `BACKUP DATABASE` is needed before
-taking the snapshot. The snapshot captures MDF/LDF files at a VSS-consistent point.
-T-log backups run independently on AgHost-1A and form the roll-forward chain.
+### Concept: Full Restore with Additional Roll-Forward (VSS Standard)
 
-### Why No `BACKUP DATABASE` Is Needed
+This restore follows the **"Full restore with additional roll-forward"** pattern defined in
+[Microsoft's SQL Server VSS Writer Backup Guide](https://learn.microsoft.com/en-us/sql/relational-databases/backup-restore/sql-server-vss-writer-backup-guide?view=sql-server-ver17#full-restore-with-additional-roll-forward).
 
-VSS freezes SQL Server I/O before KVM takes the snapshot. The resulting E:\ qcow2 contains
-MDF/LDF files in an application-consistent state — identical to what a full backup
-produces, but captured at the disk level. SQL Server can attach these files directly and
-run crash recovery to bring them to a clean state.
+> *"The requestor can issue a restore specifying the `SetAdditionalRestores(true)` option.
+> This option indicates that the requestor is going to follow up with more roll-forward
+> restores (such as log restore, differential restore, etc.). This instructs SQL Server
+> **not to perform the recovery step** at the end of the restore operation."*
 
-### The Tail-Log: The Bridge Between Snapshot and T-Log Chain
+The SQL Writer performs restore in this sequence:
+1. **PreRestore** — closes all file handles so database files can be copied/mounted
+2. **File copy/mount** — requestor copies files to the restore location
+3. **PostRestore with NORECOVERY** — databases brought online in **RESTORING** state (no crash recovery)
+4. **Roll-forward** — T-logs or differentials applied via T-SQL (`RESTORE LOG WITH STOPAT`)
 
-After crash recovery via `FOR ATTACH`, the database is **ONLINE** at the snapshot LSN.
-T-logs can only be applied to a database in **RESTORING** state. The tail-log backup
-transitions the database from ONLINE → RESTORING so the T-log chain can continue:
+In production (Tessell), `TessellVdiOperation.exe R` implements this VSS restore
+(`SetAdditionalRestores(true)`) using the writer metadata `.dmp` file saved during backup.
+The result: databases land in `RESTORING` state with the **original snapshot LSN preserved**.
+
+### ⚠️ Why `CREATE DATABASE FOR ATTACH` Does NOT Work for PITR
+
+`FOR ATTACH` is SQL Server crash recovery — it reads the LDF, rolls back uncommitted
+transactions, writes checkpoint records, and brings the database **ONLINE**. This creates
+an **LSN divergence** that permanently breaks the T-log chain:
 
 ```
-E:\ qcow2 attached as T:\ on SqlPoc
-  → Copy MDF/LDF from T:\ to SqlPoc local drives
-  → CREATE DATABASE FOR ATTACH → crash recovery → DB ONLINE at snapshot LSN
-  → BACKUP LOG WITH NORECOVERY   ← tail-log: closes LSN gap, puts DB into RESTORING
-  → RESTORE LOG tlog1.trn WITH NORECOVERY, STOPAT='target'
-  → RESTORE LOG tlog2.trn WITH NORECOVERY, STOPAT='target'
-  → RESTORE DATABASE WITH RECOVERY → DB ONLINE at target timestamp
+AgHost-1A snapshot LSN:  44000001200000000
+                          │
+                          ├── AgHost-1A continues:  T-log set → ends at 44000001366200001
+                          │
+                          └── SqlPoc FOR ATTACH (crash recovery):
+                                writes checkpoint + CDC cleanup → jumps to 44000001579200001
+                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                                                  DIVERGED — no AgHost-1A T-log
+                                                                  can reach this LSN
 ```
+
+`RESTORE LOG` fails with: *"The log in this backup set terminates at LSN X, which is too
+early to apply to the database."* — proven during E2E testing (Run 2).
+
+The tail-log backup does NOT fix this — it captures SqlPoc's diverged LSN, which makes the
+gap even larger from AgHost-1A's T-log perspective.
+
+### KVM Equivalent Approaches (Without VSS Requester Binary)
+
+Since KVM's `virsh --quiesce` only triggers the VSS freeze (not the VSS restore protocol),
+the `SetAdditionalRestores(true)` mechanism is unavailable. The T-SQL equivalent that
+achieves the same result — **databases in RESTORING state, LSN preserved** — is:
+
+| SQL Server Version | Approach | Full backup file needed? |
+|---|---|---|
+| **SQL Server 2022** | `SUSPEND_FOR_SNAPSHOT_BACKUP` + `METADATA_ONLY` backup | ❌ No (tiny metadata only) |
+| **SQL Server 2019** | `BACKUP DATABASE` inside the VSS snapshot | ✅ Yes (inside snapshot) |
+
+Both produce a database in `RESTORING` state after `RESTORE DATABASE ... WITH NORECOVERY`,
+identical to what the VSS Writer's `SetAdditionalRestores(true)` produces.
+
+#### Path A — SQL Server 2022 (True Zero-Full-Backup PITR)
+
+```sql
+-- On AgHost-1A: suspend database I/O (replaces VSS freeze for snapshot backup)
+ALTER DATABASE [YourDatabase] SET SUSPEND_FOR_SNAPSHOT_BACKUP = ON;
+-- ← Take KVM VSS snapshot here (virsh snapshot-create-as --quiesce)
+-- After snapshot, generate tiny metadata-only backup (few KB, no data content):
+BACKUP DATABASE [YourDatabase]
+    TO DISK = N'E:\Backups\YourDatabase_snap.bkm'
+    WITH METADATA_ONLY, FORMAT;
+```
+
+Restore on SqlPoc:
+```sql
+-- Metadata .bkm file points to the snapshot MDF/LDF location
+RESTORE DATABASE [YourDatabase]
+    FROM DISK = N'E:\Backups\YourDatabase_snap.bkm'
+    WITH NORECOVERY,
+         MOVE N'YourDatabase'     TO N'E:\MSSQL\Data\YourDatabase.mdf',
+         MOVE N'YourDatabase_log' TO N'E:\MSSQL\Data\YourDatabase_log.ldf';
+-- DB is now in RESTORING state — apply T-logs
+RESTORE LOG [YourDatabase] FROM DISK = N'...' WITH NORECOVERY, STOPAT = '...';
+RESTORE DATABASE [YourDatabase] WITH RECOVERY;
+```
+
+#### Path B — SQL Server 2019 (BACKUP DATABASE inside the Snapshot)
+
+`BACKUP DATABASE` is taken **on AgHost-1A before the VSS snapshot**. The snapshot then
+captures both the `.bak` file and the MDF/LDF files on E:\ simultaneously.
+On SqlPoc, `RESTORE DATABASE WITH NORECOVERY` from the `.bak` puts the database into
+`RESTORING` state without crash recovery — the LSN chain is intact and T-logs apply cleanly.
+
+```
+E:\ qcow2 snapshot contains:
+  E:\Backups\YourDatabase_<ts>.bak   ← full backup, LSN baseline
+  E:\MSSQL\DATA\YourDatabase.mdf    ← point-in-time data files (not used for PITR restore)
+  E:\MSSQL\DATA\YourDatabase_log.ldf
+
+Restore flow (Path B):
+  Attach snapshot → T:\
+  Copy .bak from T:\ to SqlPoc local E:\Backups\
+  RESTORE DATABASE WITH NORECOVERY from .bak  → DB in RESTORING (LSN preserved, no crash recovery)
+  RESTORE LOG T-log1 WITH NORECOVERY, STOPAT  → roll forward
+  RESTORE LOG T-log2 WITH NORECOVERY, STOPAT  → roll forward
+  RESTORE DATABASE WITH RECOVERY              → DB ONLINE at target timestamp ✅
+```
+
+> **Note:** Path B is also what Tessell's HPC-shape path uses internally — `BACKUP DATABASE`
+> (not VSS/VDI). Both paths are production-validated patterns.
 
 ---
 
-### Step 1 — Pre-requisite on AgHost-1A: Full Recovery Model + Ongoing T-Log Backups
+### Step 1 — Pre-requisite on AgHost-1A: Full Recovery Model + Full Backup + T-Log Chain
 
-> No `BACKUP DATABASE` needed — the VSS snapshot is the full backup.
-> The only requirement is that databases are in `FULL` recovery model so a T-log chain exists.
+> **Path B (SQL Server 2019):** A `BACKUP DATABASE` is taken **before** the VSS snapshot.
+> The snapshot then captures the `.bak` file alongside the MDF/LDF on E:\, so the backup
+> is always consistent with the disk state at the snapshot point.
+>
+> **Path A (SQL Server 2022):** Skip `BACKUP DATABASE` — use `SUSPEND_FOR_SNAPSHOT_BACKUP`
+> + `METADATA_ONLY` backup instead (see concept section above).
+
+#### 1a — Ensure FULL Recovery Model (one-time per database)
 
 ```sql
--- Run on AgHost-1A — one-time setup per database
-
--- Ensure FULL recovery model (required for T-log chain)
+-- Run on AgHost-1A
 ALTER DATABASE [YourDatabase] SET RECOVERY FULL;
 GO
 
@@ -1714,19 +1799,35 @@ ORDER BY name;
 -- Expected: FULL
 ```
 
-T-log backups should be running on a schedule (e.g., every 15–30 min via SQL Agent job):
+#### 1b — Take FULL Database Backup (SQL Server 2019 — Path B)
+
+Run this **immediately before** taking the VSS snapshot. The snapshot will capture the
+`.bak` file frozen on E:\, creating a consistent backup+snapshot pair.
+
+```sql
+-- Run on AgHost-1A — generates the PITR baseline backup
+DECLARE @ts   VARCHAR(20) = REPLACE(REPLACE(CONVERT(VARCHAR,GETDATE(),120),':',''),'-','')
+DECLARE @path VARCHAR(500) = N'E:\Backups\' + N'YourDatabase_' + @ts + N'.bak'
+
+BACKUP DATABASE [YourDatabase]
+    TO DISK = @path
+    WITH COMPRESSION, CHECKSUM, STATS = 10;
+GO
+```
+
+#### 1c — Scheduled T-Log Backups (continuous, every 15–30 min)
 
 ```sql
 -- Sample scheduled T-log backup job step (runs on AgHost-1A)
 BACKUP LOG [YourDatabase]
-TO DISK = N'E:\TLogBackups\YourDatabase_' +
-          REPLACE(REPLACE(CONVERT(varchar,GETDATE(),120),':',''),'-','') + '.trn'
-WITH COMPRESSION, STATS = 10;
+    TO DISK = N'E:\TLogBackups\YourDatabase_' +
+              REPLACE(REPLACE(CONVERT(VARCHAR,GETDATE(),120),':',''),'-','') + N'.trn'
+    WITH COMPRESSION, STATS = 10;
 GO
 ```
 
-> These `.trn` files accumulate on `E:\TLogBackups\` and form the roll-forward chain
-> from the snapshot point onward. Copy them to SqlPoc when you are ready to restore.
+> T-log files written **after the full backup** (Step 1b) form the roll-forward chain.
+> Copy them to SqlPoc at restore time. T-logs written before the backup are not needed.
 
 ### Step 2 — Take the VSS Snapshot and Save E:\ qcow2 (ryzen9)
 
@@ -1830,101 +1931,101 @@ Get-ChildItem "T:\MSSQL15.MSSQLSERVER\MSSQL\DATA\" | Select Name | Sort-Object N
 
 Expected — MDF/LDF files for all databases visible under `T:\MSSQL15.MSSQLSERVER\MSSQL\DATA\`.
 
-### Step 5 — Copy MDF/LDF Files from T:\ to SqlPoc Local Drives
+### Step 5 — Copy `.bak` File from T:\ to SqlPoc Local Drive
+
+> The snapshot contains the full backup (`.bak`) taken in Step 1b on AgHost-1A.
+> Copy it from T:\ — this is the restore baseline. MDF/LDF are **not** needed for the restore.
 
 ```powershell
-# Create target directory on SqlPoc (SQL Server default data path)
-New-Item -ItemType Directory -Force "E:\MSSQL\Data"
+# Run on SqlPoc (PowerShell as Administrator)
+New-Item -ItemType Directory -Force 'E:\Backups' | Out-Null
+$src = 'T:\Backups'   # path where Step 1b stored the .bak on AgHost-1A's E:\
 
-# AgHost-1A SQL files are at this path on the snapshot disk:
-$src = "T:\MSSQL15.MSSQLSERVER\MSSQL\DATA"
-$dst = "E:\MSSQL\Data"
+# Copy all .bak files from the snapshot disk
+Get-ChildItem $src -Filter '*.bak' | ForEach-Object {
+    Write-Host "[$(Get-Date -f HH:mm:ss)] Copying $($_.Name) ..."
+    Copy-Item $_.FullName 'E:\Backups\' -Force
+    Write-Host "  OK: $($_.Name)"
+}
 
-# Copy MDF/LDF for each user database (adjust list as needed)
-$dbs = @('CDCDemo', 'Db2', 'DBA', 'Facebook')   # excludes StackOverflow2013 (too large for POC)
+Get-ChildItem 'E:\Backups\' | Select Name, @{N='MB';E={[math]::Round($_.Length/1MB,1)}} |
+    Format-Table
+```
+
+> T:\ can now be removed — the `.bak` files are on SqlPoc's local `E:\Backups\`.
+
+### Step 6 — Restore Databases WITH NORECOVERY (Leaves DB in RESTORING State)
+
+> This step is the **KVM equivalent of VSS "Full restore with additional roll-forward"**.
+> `RESTORE DATABASE WITH NORECOVERY` does **not** run crash recovery and does **not** bring
+> the database ONLINE. The database lands in `RESTORING` state with the original backup LSN
+> preserved — identical to what `SetAdditionalRestores(true)` achieves via the VSS Writer.
+>
+> ❌ Do NOT use `CREATE DATABASE ... FOR ATTACH` here — it runs crash recovery and advances
+>    the LSN, permanently breaking the T-log chain from AgHost-1A (see concept section).
+
+```powershell
+# Run on SqlPoc (PowerShell as Administrator)
+# Adjust file names to match what Step 1b generated (timestamp in name)
+$dbs = @(
+    @{ Name='CDCDemo';  Bak='E:\Backups\CDCDemo_<ts>.bak';  Mdf='E:\MSSQL\Data\CDCDemo.mdf';  Ldf='E:\MSSQL\Data\CDCDemo_log.ldf'  }
+    @{ Name='Db2';      Bak='E:\Backups\Db2_<ts>.bak';      Mdf='E:\MSSQL\Data\Db2.mdf';      Ldf='E:\MSSQL\Data\Db2_log.ldf'      }
+    @{ Name='Facebook'; Bak='E:\Backups\Facebook_<ts>.bak'; Mdf='E:\MSSQL\Data\Facebook.mdf'; Ldf='E:\MSSQL\Data\Facebook_log.ldf' }
+)
+
+New-Item -ItemType Directory -Force 'E:\MSSQL\Data' | Out-Null
+
 foreach ($db in $dbs) {
-    Write-Host "[$(Get-Date -f HH:mm:ss)] Copying $db ..."
-    Copy-Item "$src\$db.mdf"     "$dst\$db.mdf"
-    Copy-Item "$src\${db}_log.ldf" "$dst\${db}_log.ldf"
-}
+    Write-Host "[$(Get-Date -f HH:mm:ss)] Restoring $($db.Name) WITH NORECOVERY ..."
+    # Get logical file names from the backup header
+    $files = Invoke-Sqlcmd -ServerInstance '.' -QueryTimeout 60 -Query (
+        "RESTORE FILELISTONLY FROM DISK = N'$($db.Bak)';"
+    )
+    $dataLogical = ($files | Where-Object Type -eq 'D' | Select-Object -First 1).LogicalName
+    $logLogical  = ($files | Where-Object Type -eq 'L' | Select-Object -First 1).LogicalName
 
-# Confirm copies
-Get-ChildItem $dst | Select Name, @{N='SizeMB';E={[math]::Round($_.Length/1MB,1)}} |
-    Sort-Object Name | Format-Table
-```
-
-> T:\ can now be removed — all database files are on SqlPoc's local `E:\MSSQL\Data\`.
-
-### Step 6 — Attach the Databases and Let SQL Server Run Crash Recovery
-
-```powershell
-# PowerShell loop on SqlPoc — FOR ATTACH each user database
-$dbs = [ordered]@{
-    'CDCDemo'  = @('E:\MSSQL\Data\CDCDemo.mdf',  'E:\MSSQL\Data\CDCDemo_log.ldf')
-    'Db2'      = @('E:\MSSQL\Data\Db2.mdf',      'E:\MSSQL\Data\Db2_log.ldf')
-    'DBA'      = @('E:\MSSQL\Data\DBA.mdf',       'E:\MSSQL\Data\DBA_log.ldf')
-    'Facebook' = @('E:\MSSQL\Data\Facebook.mdf', 'E:\MSSQL\Data\Facebook_log.ldf')
-}
-foreach ($db in $dbs.Keys) {
-    $f0 = $dbs[$db][0]; $f1 = $dbs[$db][1]
-    $sql = "CREATE DATABASE [$db] ON (FILENAME=N'$f0'),(FILENAME=N'$f1') FOR ATTACH;"
-    Write-Host "[$(Get-Date -f HH:mm:ss)] Attaching $db ..."
     try {
-        Invoke-Sqlcmd -ServerInstance '.' -Query $sql -QueryTimeout 120 -ErrorAction Stop
-        Write-Host "  OK: $db"
-    } catch { Write-Host "  FAIL $db : $($_.Exception.Message)" }
+        Invoke-Sqlcmd -ServerInstance '.' -QueryTimeout 600 -ErrorAction Stop -Query "
+            RESTORE DATABASE [$($db.Name)]
+                FROM DISK = N'$($db.Bak)'
+                WITH NORECOVERY,
+                     MOVE N'$dataLogical' TO N'$($db.Mdf)',
+                     MOVE N'$logLogical'  TO N'$($db.Ldf)',
+                     STATS = 10, REPLACE;"
+        Write-Host "  OK: $($db.Name) → RESTORING"
+    } catch {
+        Write-Error "  FAIL $($db.Name): $($_.Exception.Message)"
+    }
 }
 
-# Verify all ONLINE
+# Verify all databases are in RESTORING state
 Invoke-Sqlcmd -ServerInstance '.' -Query "
-SELECT name, state_desc FROM sys.databases
-WHERE name NOT IN ('master','model','msdb','tempdb') ORDER BY name;"
+    SELECT name, state_desc FROM sys.databases
+    WHERE name NOT IN ('master','model','msdb','tempdb') ORDER BY name;"
+# Expected: state_desc = RESTORING for all
 ```
 
-> **TDE databases:** If a database was encrypted with TDE on the source server, `FOR ATTACH`
-> will fail with *"Cannot find server certificate with thumbprint"*. Export the certificate
-> and private key from AgHost-1A and import to SqlPoc before retrying:
+> **TDE databases:** `RESTORE DATABASE` will fail with *"Cannot find server certificate
+> with thumbprint"* if the source database used TDE. Export and import the certificate
+> **before** this step:
 >
 > ```sql
 > -- On AgHost-1A: export TDE certificate
 > BACKUP CERTIFICATE [AGHOST-1A__Certificate]
-> TO FILE = N'C:\Temp\AgHost1A_TDE.cer'
-> WITH PRIVATE KEY (FILE = N'C:\Temp\AgHost1A_TDE.pvk',
->                   ENCRYPTION BY PASSWORD = N'YourExportPwd!');
+>     TO FILE = N'C:\Temp\AgHost1A_TDE.cer'
+>     WITH PRIVATE KEY (FILE = N'C:\Temp\AgHost1A_TDE.pvk',
+>                       ENCRYPTION BY PASSWORD = N'YourExportPwd!');
 >
 > -- On SqlPoc: import TDE certificate (create master key first if needed)
 > CREATE MASTER KEY ENCRYPTION BY PASSWORD = N'MasterKeyPa55!';
 > CREATE CERTIFICATE [AGHOST-1A__Certificate]
-> FROM FILE = N'C:\Temp\AgHost1A_TDE.cer'
-> WITH PRIVATE KEY (FILE = N'C:\Temp\AgHost1A_TDE.pvk',
->                   DECRYPTION BY PASSWORD = N'YourExportPwd!');
-> -- Now retry FOR ATTACH for the TDE database
+>     FROM FILE = N'C:\Temp\AgHost1A_TDE.cer'
+>     WITH PRIVATE KEY (FILE = N'C:\Temp\AgHost1A_TDE.pvk',
+>                       DECRYPTION BY PASSWORD = N'YourExportPwd!');
+> -- Now retry RESTORE DATABASE WITH NORECOVERY
 > ```
 
-### Step 7 — Take Tail-Log Backup WITH NORECOVERY (The Bridge Step)
-
-The database is currently ONLINE at the snapshot LSN. Taking a tail-log backup with
-`NORECOVERY` does two things simultaneously:
-1. Captures any log records generated during crash recovery (closes the gap)
-2. Puts the database into **RESTORING** state — T-logs can now be applied
-
-```sql
--- Tail-log backup — captures log from snapshot LSN and puts DB into RESTORING
-BACKUP LOG [YourDatabase]
-TO DISK = N'E:\TLogBackups\YourDatabase_tail.trn'
-WITH NORECOVERY, COMPRESSION, STATS = 10;
-GO
-
--- Verify DB is now in RESTORING state
-SELECT name, state_desc FROM sys.databases WHERE name = N'YourDatabase';
--- Expected: RESTORING
-```
-
-> ⚠️ **Do not skip this step.** Without the tail-log, the database is ONLINE and
-> subsequent `RESTORE LOG` commands will fail. The tail-log is the bridge between the
-> snapshot (crash-recovered, ONLINE) and the T-log chain (RESTORING).
-
-### Step 8 — Copy T-Log Files from AgHost-1A and Apply (PITR Roll Forward)
+### Step 7 — Copy T-Log Files from AgHost-1A and Apply (PITR Roll Forward)
 
 T-log files live on AgHost-1A's `E:\TLogBackups\`. Since both VMs are domain-joined,
 SqlPoc can copy them directly over SMB from AgHost-1A's admin share.
@@ -1933,19 +2034,20 @@ SqlPoc can copy them directly over SMB from AgHost-1A's admin share.
 > `"Sales" -in $file` hits "SalesArchive" and "SalesTemp" → wrong T-logs applied →
 > **silent data corruption**. Always use `$file.Name.ToLower().StartsWith($db.ToLower() + '_')`.
 
-> ⚠️ **DBA note:** If a database was in `SIMPLE` recovery before the snapshot, there is
-> no log chain from AgHost-1A to apply. Take a `BACKUP DATABASE` on SqlPoc (after FOR ATTACH)
-> to establish a local baseline, then take `BACKUP LOG WITH NORECOVERY` for the tail-log.
+> ⚠️ **Only apply T-logs taken AFTER the Step 1b `BACKUP DATABASE` timestamp.**
+> T-logs taken before the backup do not belong to this restore chain and will fail with
+> *"LSN terminates too early"*. Filter by filename timestamp if needed.
 
 ```powershell
 # Run on SqlPoc (PowerShell as Administrator)
 
-$TargetTime  = '2026-04-12T18:00:00'           # PITR target timestamp
+$TargetTime  = '2026-04-12T18:00:00'           # PITR target timestamp (UTC or local)
+$BackupTs    = '20260412_174553'                # timestamp from Step 1b .bak filename
 $SrcTLogDir  = '\\AGHOST-1A\E$\TLogBackups'    # AgHost-1A admin share (domain auth)
 $DstTLogDir  = 'E:\TLogBackups'
-$Databases   = @('CDCDemo', 'Db2', 'Facebook') # databases in FULL recovery before snapshot
+$Databases   = @('CDCDemo', 'Db2', 'Facebook') # must be in FULL recovery before Step 1b
 
-# Step 8a: Copy T-log files from AgHost-1A to SqlPoc
+# Step 7a: Copy T-log files from AgHost-1A to SqlPoc
 New-Item -ItemType Directory -Force $DstTLogDir | Out-Null
 if (Test-Path $SrcTLogDir) {
     $files = Get-ChildItem $SrcTLogDir -Filter '*.trn'
@@ -1955,14 +2057,18 @@ if (Test-Path $SrcTLogDir) {
     Write-Warning "SMB path $SrcTLogDir not reachable — copy .trn files manually to $DstTLogDir"
 }
 
-# Step 8b: Apply T-logs per DB with STOPAT (safe StartsWith filter)
+# Step 7b: Apply T-logs per DB with STOPAT (safe StartsWith filter, post-backup only)
 foreach ($db in $Databases) {
     $tlogFiles = Get-ChildItem $DstTLogDir -Filter '*.trn' |
-                 Where-Object { $_.Name.ToLower().StartsWith($db.ToLower() + '_') } |
+                 Where-Object {
+                     $_.Name.ToLower().StartsWith($db.ToLower() + '_') -and
+                     # Skip T-logs taken before the full backup
+                     ($_.Name -replace "^$($db)_", '' -replace '\.trn$', '') -ge $BackupTs
+                 } |
                  Sort-Object Name
 
-    if ($tlogFiles.Count -eq 0) { Write-Warning "[$db] No T-logs — skipping"; continue }
-    Write-Host "[$db] Applying $($tlogFiles.Count) T-log(s)..."
+    if ($tlogFiles.Count -eq 0) { Write-Warning "[$db] No post-backup T-logs — skipping"; continue }
+    Write-Host "[$db] Applying $($tlogFiles.Count) T-log(s) up to $TargetTime ..."
 
     foreach ($tlog in $tlogFiles) {
         try {
@@ -1971,7 +2077,7 @@ foreach ($db in $Databases) {
                 WITH NORECOVERY, STOPAT = '$TargetTime', STATS = 10;"
             Write-Host "  [OK] $($tlog.Name)"
         } catch {
-            Write-Error "  [FAIL] $($tlog.Name): $_"
+            Write-Error "  [FAIL] $($tlog.Name): $($_.Exception.Message)"
             Write-Error "  [$db] T-log chain broken — do NOT recover this DB"
             break
         }
@@ -1980,7 +2086,7 @@ foreach ($db in $Databases) {
 ```
 
 > **`STOPAT` on every file** — SQL Server stops at the target timestamp within whichever
-> log file contains it and ignores subsequent files. Safe to specify on every `RESTORE LOG`.
+> log file contains it and ignores all subsequent files. Safe to specify on every `RESTORE LOG`.
 
 ### Step 9 — Bring All Databases Online in Parallel (Final Recovery)
 
@@ -2093,36 +2199,45 @@ echo "Backup qcow2 deleted"
 
 | Step | Where | Action |
 |---|---|---|
-| 1 | AgHost-1A (SQL) | Ensure `FULL` recovery; T-log backups scheduled (`E:\TLogBackups\`) |
-| 2 | ryzen9 | E:\ only VSS snapshot → copy qcow2 to `/vm-storage-02/` |
-| 3 | ryzen9 | `virsh attach-disk SqlPoc ... vdd --readonly --live` |
+| 1a | AgHost-1A (SQL) | Ensure `FULL` recovery model for all databases |
+| 1b | AgHost-1A (SQL) | `BACKUP DATABASE` → `E:\Backups\<db>_<ts>.bak` (SQL 2019) / `SUSPEND_FOR_SNAPSHOT_BACKUP` + `METADATA_ONLY` (SQL 2022) |
+| 1c | AgHost-1A (SQL Agent) | Scheduled T-log backups every 15–30 min → `E:\TLogBackups\` |
+| 2 | ryzen9 | E:\ only VSS snapshot (captures `.bak` + MDF/LDF) → copy qcow2 to `/vm-storage-02/` |
+| 3 | ryzen9 | `virsh attach-device SqlPoc vdd.xml --live` (with `<readonly/>`) |
 | 4 | SqlPoc (PowerShell) | Bring disk online read-only → assign `T:\` |
-| 5 | SqlPoc (PowerShell) | Copy MDF/LDF from `T:\` to local `E:\SQLData\` / `E:\SQLLogs\` |
-| 6 | SqlPoc (SQL) | `CREATE DATABASE ... FOR ATTACH` → crash recovery → **ONLINE** |
-| 7 | SqlPoc (SQL) | `BACKUP LOG WITH NORECOVERY` (tail-log) → **RESTORING** ⬅ key step |
-| 8 | SqlPoc (PowerShell) | Filter T-logs per DB with `StartsWith` → `RESTORE LOG WITH STOPAT` |
-| 9 | SqlPoc (PowerShell) | Parallel `RESTORE DATABASE WITH RECOVERY` per DB → **ONLINE** |
-| 10 | SqlPoc (SQL) | Fix orphan users, sync logins, rename instance |
-| 11 | SqlPoc + ryzen9 | Remove `T:\` → offline disk → `virsh detach-disk` → delete qcow2 |
+| 5 | SqlPoc (PowerShell) | Copy `.bak` from `T:\Backups\` to local `E:\Backups\` |
+| 6 | SqlPoc (SQL) | `RESTORE DATABASE WITH NORECOVERY` from `.bak` → DB in **RESTORING** (no crash recovery, LSN preserved) |
+| 7 | SqlPoc (PowerShell) | Filter post-backup T-logs with `StartsWith` → `RESTORE LOG WITH NORECOVERY, STOPAT` |
+| 8 | SqlPoc (PowerShell) | Parallel `RESTORE DATABASE WITH RECOVERY` per DB → **ONLINE** at target timestamp |
+| 9 | SqlPoc (SQL) | Fix orphan users, sync logins, rename instance |
+| 10 | SqlPoc + ryzen9 | Remove `T:\` → offline disk → `virsh detach-device` → delete qcow2 |
 
 ---
 
 ### Common Pitfalls to Avoid
 
-The following are real issues — some discovered during this POC's E2E test run,
+The following are real issues — some discovered during this POC's E2E test runs,
 some from known SQL Server VSS restore patterns.
 
 | # | Issue | Problem | Fix |
 |---|---|---|---|
 | **P1** | `virsh attach-disk --readonly` | Flag not supported — returns error | Use `virsh attach-device` with XML containing `<readonly/>` |
 | **P2** | Windows auto-assigns drive letter | Disk comes online as `H:\` instead of `T:\` | Remove auto-assigned letter with `Remove-PartitionAccessPath`, then assign `T:\` |
-| **P3** | TDE database: `FOR ATTACH` fails | *"Cannot find server certificate with thumbprint"* | Export cert + private key from source; import on SqlPoc before attaching |
-| **P4** | DB was SIMPLE recovery before snapshot | `BACKUP LOG WITH NORECOVERY` fails — *"no current database backup"* | Take `BACKUP DATABASE` on SqlPoc (after FOR ATTACH) to establish local baseline |
-| **P5** | WinRM 413 for large file transfer | Base64-encoded T-log files (>5MB) exceed WinRM envelope limit | Copy T-logs via SMB admin share (`\\AGHOST-1A\E$\TLogBackups`) |
-| **B1** | Fixed sleep durations | Too short on slow systems, wasteful on fast | `Wait-Job -Timeout 600` + poll loop |
+| **P3** | TDE database: `RESTORE DATABASE` fails | *"Cannot find server certificate with thumbprint"* | Export cert + private key from source; import on SqlPoc **before** `RESTORE DATABASE` |
+| **P4** | DB was SIMPLE recovery before snapshot | No T-log chain exists from source — `RESTORE LOG` fails | Ensure `FULL` recovery and run Step 1b (`BACKUP DATABASE`) before taking the snapshot |
+| **P5** | WinRM 413 for large file transfer | Base64-encoded files (>5 MB) exceed WinRM envelope limit | Copy T-logs via SMB admin share (`\\AGHOST-1A\E$\TLogBackups`) |
+| **P6** ⚠️ | `FOR ATTACH` used instead of `RESTORE WITH NORECOVERY` | Crash recovery runs → LSN diverges → all subsequent `RESTORE LOG` commands fail with *"LSN terminates too early"* | Always use `RESTORE DATABASE ... WITH NORECOVERY` from the `.bak` inside the snapshot |
+| **B1** | Fixed sleep durations in recovery loop | Too short on slow systems, wasteful on fast | `Wait-Job -Timeout 600` + poll loop |
 | **B4** ⚠️ | `"Sales" -in $filename` substring match | Matches "SalesArchive" and "SalesTemp" → **wrong T-logs → silent data corruption** | `$file.Name.ToLower().StartsWith($db.ToLower() + '_')` |
 | **B9** | No try/catch on `RESTORE LOG` | Silent T-log failures leave DB in broken unknown state | `try/catch` + `break` + explicit error per file |
 
-> **B4 (P5 in T-log context) is the most dangerous** — wrong T-logs applied to the
-> wrong database causes silent data corruption that may go undetected for months.
+> **P6 is the most critical architectural mistake** — using `FOR ATTACH` instead of
+> `RESTORE DATABASE WITH NORECOVERY` makes PITR permanently impossible for that restore.
+> The database LSN diverges during crash recovery on the target and no T-log from the
+> source can bridge the gap. This is exactly what `SetAdditionalRestores(true)` in the
+> VSS Writer protocol prevents: it keeps the database in `RESTORING` state, skipping
+> crash recovery entirely.
+>
+> **B4 is the most dangerous silent failure** — wrong T-logs applied to the wrong
+> database causes data corruption that may go undetected for months.
 > Always use `StartsWith(db + '_')`. Never use substring/contains match on database name.
