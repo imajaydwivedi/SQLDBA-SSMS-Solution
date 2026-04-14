@@ -1744,9 +1744,10 @@ RESTORE DATABASE [YourDatabase]
     WITH NORECOVERY,
          MOVE N'YourDatabase'     TO N'E:\MSSQL\Data\YourDatabase.mdf',
          MOVE N'YourDatabase_log' TO N'E:\MSSQL\Data\YourDatabase_log.ldf';
--- DB is now in RESTORING state — apply T-logs
-RESTORE LOG [YourDatabase] FROM DISK = N'...' WITH NORECOVERY, STOPAT = '...';
-RESTORE DATABASE [YourDatabase] WITH RECOVERY;
+-- DB is now in RESTORING state — apply T-logs continuously (no STOPAT for rolling)
+RESTORE LOG [YourDatabase] FROM DISK = N'..._tlog1.trn' WITH NORECOVERY;
+RESTORE LOG [YourDatabase] FROM DISK = N'..._tlog2.trn' WITH NORECOVERY;
+-- Repeat every 15 min as new T-logs arrive. RESTORE WITH RECOVERY only on failover.
 ```
 
 #### Path B — SQL Server 2019 (BACKUP DATABASE inside the Snapshot)
@@ -1759,16 +1760,22 @@ On SqlPoc, `RESTORE DATABASE WITH NORECOVERY` from the `.bak` puts the database 
 ```
 E:\ qcow2 snapshot contains:
   E:\Backups\YourDatabase_<ts>.bak   ← full backup, LSN baseline
-  E:\MSSQL\DATA\YourDatabase.mdf    ← point-in-time data files (not used for PITR restore)
+  E:\MSSQL\DATA\YourDatabase.mdf    ← point-in-time data files (not used for restore)
   E:\MSSQL\DATA\YourDatabase_log.ldf
 
-Restore flow (Path B):
+Initial restore (once):
   Attach snapshot → T:\
   Copy .bak from T:\ to SqlPoc local E:\Backups\
-  RESTORE DATABASE WITH NORECOVERY from .bak  → DB in RESTORING (LSN preserved, no crash recovery)
-  RESTORE LOG T-log1 WITH NORECOVERY, STOPAT  → roll forward
-  RESTORE LOG T-log2 WITH NORECOVERY, STOPAT  → roll forward
-  RESTORE DATABASE WITH RECOVERY              → DB ONLINE at target timestamp ✅
+  RESTORE DATABASE WITH NORECOVERY  → DB in RESTORING (LSN preserved, no crash recovery)
+
+Ongoing roll-forward (every 15 min — repeating job on SqlPoc):
+  Copy new .trn files from \\AGHOST-1A\E$\TLogBackups
+  RESTORE LOG tlog_N WITH NORECOVERY  → DB stays in RESTORING, rolls forward
+  RESTORE LOG tlog_N+1 WITH NORECOVERY → DB stays in RESTORING, rolls forward
+  ... repeat as T-logs arrive ...
+
+On failover / DR test (on demand):
+  RESTORE DATABASE WITH RECOVERY       → DB ONLINE ✅ (terminates log chain)
 ```
 
 > **Note:** Path B is also what Tessell's HPC-shape path uses internally — `BACKUP DATABASE`
@@ -1815,10 +1822,10 @@ BACKUP DATABASE [YourDatabase]
 GO
 ```
 
-#### 1c — Scheduled T-Log Backups (continuous, every 15–30 min)
+#### 1c — Scheduled T-Log Backups (continuous, every 15 minutes)
 
 ```sql
--- Sample scheduled T-log backup job step (runs on AgHost-1A)
+-- SQL Agent job step on AgHost-1A — runs every 15 minutes
 BACKUP LOG [YourDatabase]
     TO DISK = N'E:\TLogBackups\YourDatabase_' +
               REPLACE(REPLACE(CONVERT(VARCHAR,GETDATE(),120),':',''),'-','') + N'.trn'
@@ -1827,7 +1834,7 @@ GO
 ```
 
 > T-log files written **after the full backup** (Step 1b) form the roll-forward chain.
-> Copy them to SqlPoc at restore time. T-logs written before the backup are not needed.
+> Files before the Step 1b backup timestamp are irrelevant and should not be applied.
 
 ### Step 2 — Take the VSS Snapshot and Save E:\ qcow2 (ryzen9)
 
@@ -1845,7 +1852,9 @@ virsh snapshot-create-as AgHost-1A \
   --disk-only --quiesce --atomic
 
 # Copy the E:\ base image (frozen at snapshot LSN) to backup storage
-sudo cp /vm-storage-01/AgHost-1A_E_Drive.qcow2 \
+# rsync is preferred over cp: shows progress, resumes if interrupted
+sudo rsync -avhP \
+  /vm-storage-01/AgHost-1A_E_Drive.qcow2 \
   /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2
 
 # Verify integrity
@@ -2025,56 +2034,51 @@ Invoke-Sqlcmd -ServerInstance '.' -Query "
 > -- Now retry RESTORE DATABASE WITH NORECOVERY
 > ```
 
-### Step 7 — Copy T-Log Files from AgHost-1A and Apply (PITR Roll Forward)
+### Step 7 — Initial T-Log Apply: Bring SqlPoc Up to Current (First Run)
 
-T-log files live on AgHost-1A's `E:\TLogBackups\`. Since both VMs are domain-joined,
-SqlPoc can copy them directly over SMB from AgHost-1A's admin share.
+After `RESTORE DATABASE WITH NORECOVERY` in Step 6, the database is in `RESTORING` state
+at the backup LSN. Apply all T-logs produced **after** the Step 1b backup to bring SqlPoc
+current with AgHost-1A. After this step, the **ongoing job (Step 8)** takes over.
 
 > ⚠️ **Critical: use `StartsWith` for file filtering, not substring match.**
 > `"Sales" -in $file` hits "SalesArchive" and "SalesTemp" → wrong T-logs applied →
 > **silent data corruption**. Always use `$file.Name.ToLower().StartsWith($db.ToLower() + '_')`.
 
-> ⚠️ **Only apply T-logs taken AFTER the Step 1b `BACKUP DATABASE` timestamp.**
-> T-logs taken before the backup do not belong to this restore chain and will fail with
-> *"LSN terminates too early"*. Filter by filename timestamp if needed.
+> ⚠️ **No `STOPAT` for continuous rolling.** `STOPAT` limits application to a fixed
+> timestamp and is only used when you need to stop at a specific point (e.g. before an
+> incident). For continuous warm-standby, omit `STOPAT` entirely.
 
 ```powershell
-# Run on SqlPoc (PowerShell as Administrator)
+# Run ONCE on SqlPoc immediately after Step 6 (initial catch-up)
 
-$TargetTime  = '2026-04-12T18:00:00'           # PITR target timestamp (UTC or local)
-$BackupTs    = '20260412_174553'                # timestamp from Step 1b .bak filename
-$SrcTLogDir  = '\\AGHOST-1A\E$\TLogBackups'    # AgHost-1A admin share (domain auth)
-$DstTLogDir  = 'E:\TLogBackups'
-$Databases   = @('CDCDemo', 'Db2', 'Facebook') # must be in FULL recovery before Step 1b
+$BackupTs   = '20260412_174553'                # timestamp from Step 1b .bak filename
+$SrcTLogDir = '\\AGHOST-1A\E$\TLogBackups'    # AgHost-1A admin share (domain auth)
+$DstTLogDir = 'E:\TLogBackups'
+$Databases  = @('CDCDemo', 'Db2', 'Facebook') # must be in FULL recovery before Step 1b
 
-# Step 7a: Copy T-log files from AgHost-1A to SqlPoc
 New-Item -ItemType Directory -Force $DstTLogDir | Out-Null
-if (Test-Path $SrcTLogDir) {
-    $files = Get-ChildItem $SrcTLogDir -Filter '*.trn'
-    Write-Host "Copying $($files.Count) T-log file(s) from AgHost-1A..."
-    foreach ($f in $files) { Copy-Item $f.FullName $DstTLogDir -Force; Write-Host "  $($f.Name)" }
-} else {
-    Write-Warning "SMB path $SrcTLogDir not reachable — copy .trn files manually to $DstTLogDir"
-}
 
-# Step 7b: Apply T-logs per DB with STOPAT (safe StartsWith filter, post-backup only)
+# 7a: Copy all T-logs from AgHost-1A produced after the Step 1b backup
+$files = Get-ChildItem $SrcTLogDir -Filter '*.trn' |
+         Where-Object { ($_.Name -replace '^[^_]+_','') -ge $BackupTs } |
+         Where-Object { -not (Test-Path (Join-Path $DstTLogDir $_.Name)) }
+Write-Host "Copying $($files.Count) new T-log(s) from AgHost-1A..."
+foreach ($f in $files) { Copy-Item $f.FullName $DstTLogDir -Force; Write-Host "  $($f.Name)" }
+
+# 7b: Apply T-logs per DB — WITH NORECOVERY only (no STOPAT — continuous rolling)
 foreach ($db in $Databases) {
     $tlogFiles = Get-ChildItem $DstTLogDir -Filter '*.trn' |
-                 Where-Object {
-                     $_.Name.ToLower().StartsWith($db.ToLower() + '_') -and
-                     # Skip T-logs taken before the full backup
-                     ($_.Name -replace "^$($db)_", '' -replace '\.trn$', '') -ge $BackupTs
-                 } |
+                 Where-Object { $_.Name.ToLower().StartsWith($db.ToLower() + '_') } |
                  Sort-Object Name
 
-    if ($tlogFiles.Count -eq 0) { Write-Warning "[$db] No post-backup T-logs — skipping"; continue }
-    Write-Host "[$db] Applying $($tlogFiles.Count) T-log(s) up to $TargetTime ..."
+    if ($tlogFiles.Count -eq 0) { Write-Warning "[$db] No T-logs yet — skipping"; continue }
+    Write-Host "[$db] Applying $($tlogFiles.Count) T-log(s) ..."
 
     foreach ($tlog in $tlogFiles) {
         try {
             Invoke-Sqlcmd -ServerInstance '.' -QueryTimeout 600 -ErrorAction Stop -Query "
                 RESTORE LOG [$db] FROM DISK = N'$($tlog.FullName)'
-                WITH NORECOVERY, STOPAT = '$TargetTime', STATS = 10;"
+                WITH NORECOVERY, STATS = 10;"
             Write-Host "  [OK] $($tlog.Name)"
         } catch {
             Write-Error "  [FAIL] $($tlog.Name): $($_.Exception.Message)"
@@ -2083,46 +2087,140 @@ foreach ($db in $Databases) {
         }
     }
 }
+
+# Verify all still in RESTORING (correct — they must stay RESTORING for ongoing apply)
+Invoke-Sqlcmd -ServerInstance '.' -Query "
+    SELECT name, state_desc FROM sys.databases
+    WHERE name NOT IN ('master','model','msdb','tempdb') ORDER BY name;"
+# Expected: RESTORING for all
 ```
 
-> **`STOPAT` on every file** — SQL Server stops at the target timestamp within whichever
-> log file contains it and ignores all subsequent files. Safe to specify on every `RESTORE LOG`.
+### Step 8 — Ongoing T-Log Apply Job (Every 15 Minutes — Repeating)
 
-### Step 9 — Bring All Databases Online in Parallel (Final Recovery)
+> **This is the core of the warm-standby pattern.** A SQL Agent job or Windows Task
+> Scheduler task runs on SqlPoc every 15 minutes, copies only **new** T-logs from AgHost-1A
+> (not already applied), and applies them. Databases stay in `RESTORING` state indefinitely.
+>
+> ❌ Do NOT call `RESTORE DATABASE WITH RECOVERY` here — that terminates the log chain.
+> Recovery is on-demand only (see Step 9).
+
+Save the script below as `E:\Scripts\Apply-TLogs.ps1` on SqlPoc and schedule it every 15 min:
 
 ```powershell
-# Run on SqlPoc — parallel recovery using background jobs (mirrors Start-Job pattern)
+# E:\Scripts\Apply-TLogs.ps1  — scheduled every 15 minutes on SqlPoc
+# Tracks last applied T-log per DB using a JSON state file
 
-$Databases = @('YourDatabase', 'AnotherDB')   # same list as Step 8
+$SrcTLogDir = '\\AGHOST-1A\E$\TLogBackups'
+$DstTLogDir = 'E:\TLogBackups'
+$StateFile  = 'E:\TLogBackups\applied_state.json'
+$Databases  = @('CDCDemo', 'Db2', 'Facebook')
+$LogFile    = 'E:\TLogBackups\apply_tlog.log'
+
+function Write-Log { param($msg) "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') $msg" | Tee-Object $LogFile -Append }
+
+# Load state (last applied T-log name per DB)
+$State = if (Test-Path $StateFile) { Get-Content $StateFile | ConvertFrom-Json } `
+         else { $h = @{}; foreach ($db in $Databases) { $h[$db] = '' }; $h }
+
+# Copy only NEW T-logs not already in local dir
+try {
+    $newFiles = Get-ChildItem $SrcTLogDir -Filter '*.trn' -ErrorAction Stop |
+                Where-Object { -not (Test-Path (Join-Path $DstTLogDir $_.Name)) }
+    foreach ($f in $newFiles) {
+        Copy-Item $f.FullName $DstTLogDir -Force
+        Write-Log "Copied: $($f.Name)"
+    }
+} catch {
+    Write-Log "ERROR copying from AgHost-1A: $_"; exit 1
+}
+
+# Apply new T-logs per DB (only files newer than last applied, StartsWith filter)
+foreach ($db in $Databases) {
+    $lastApplied = $State.$db
+    $tlogFiles = Get-ChildItem $DstTLogDir -Filter '*.trn' |
+                 Where-Object { $_.Name.ToLower().StartsWith($db.ToLower() + '_') } |
+                 Where-Object { $_.Name -gt $lastApplied } |
+                 Sort-Object Name
+
+    if ($tlogFiles.Count -eq 0) { Write-Log "[$db] No new T-logs."; continue }
+
+    foreach ($tlog in $tlogFiles) {
+        try {
+            Invoke-Sqlcmd -ServerInstance '.' -QueryTimeout 600 -ErrorAction Stop -Query (
+                "RESTORE LOG [$db] FROM DISK = N'$($tlog.FullName)' WITH NORECOVERY, STATS=10;"
+            )
+            $State.$db = $tlog.Name        # advance state pointer
+            Write-Log "  [OK] $db: $($tlog.Name)"
+        } catch {
+            Write-Log "  [FAIL] $db: $($tlog.Name): $($_.Exception.Message)"
+            break   # stop this DB's chain on first failure
+        }
+    }
+}
+
+# Persist state
+$State | ConvertTo-Json | Set-Content $StateFile
+Write-Log "Cycle complete."
+```
+
+**Schedule with Windows Task Scheduler (run as domain service account):**
+```powershell
+# One-time setup on SqlPoc (PowerShell as Administrator)
+$action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
+               -Argument '-NonInteractive -File E:\Scripts\Apply-TLogs.ps1'
+$trigger = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 15) `
+               -Once -At (Get-Date)
+Register-ScheduledTask -TaskName 'SqlPoc-TLog-Apply' `
+    -Action $action -Trigger $trigger `
+    -RunLevel Highest -Force
+```
+
+### Step 9 — On-Demand Recovery: Bring Databases Online (Failover / DR Test)
+
+> ⚠️ **This step is NOT part of the regular 15-minute cycle.** Call it ONLY when you
+> need to actually use the databases — a failover, a DR test, or a PITR drill.
+>
+> **After `RESTORE DATABASE WITH RECOVERY` is called:**
+> - The database is `ONLINE` and fully readable/writable
+> - No more T-logs can be applied — the log chain is permanently closed
+> - To restart warm-standby, a **new VSS snapshot + full restore cycle** (Steps 1–8) is needed
+>
+> **Optional: STOPAT before RECOVERY** — if you need to stop at a specific point in time
+> (e.g., just before an incident), apply the final T-log with `STOPAT` before calling RECOVERY:
+> ```sql
+> RESTORE LOG [YourDatabase] FROM DISK = N'...' WITH NORECOVERY, STOPAT = '2026-04-12T17:30:00';
+> RESTORE DATABASE [YourDatabase] WITH RECOVERY;
+> ```
+
+```powershell
+# Run on SqlPoc ON DEMAND (failover / DR test)
+# Parallel recovery using background jobs
+
+$Databases = @('CDCDemo', 'Db2', 'Facebook')
 
 $jobs = foreach ($db in $Databases) {
     Start-Job -ScriptBlock {
         param($dbName)
-        $sql = "RESTORE DATABASE [$dbName] WITH RECOVERY;"
         try {
-            Invoke-Sqlcmd -ServerInstance '.' -Query $sql `
-                          -QueryTimeout 300 -ErrorAction Stop
+            Invoke-Sqlcmd -ServerInstance '.' -QueryTimeout 300 -ErrorAction Stop `
+                -Query "RESTORE DATABASE [$dbName] WITH RECOVERY;"
             Write-Host "[$dbName] ONLINE"
-        }
-        catch {
+        } catch {
             Write-Error "[$dbName] Recovery failed: $_"
         }
     } -ArgumentList $db
-
     Start-Sleep -Seconds 3   # stagger job starts
 }
 
-# Wait for all jobs — use a generous timeout (not 30s like B1 in production)
 $jobs | Wait-Job -Timeout 600 | Receive-Job
 $jobs | Remove-Job
 
-# Verify all databases are ONLINE
-Invoke-Sqlcmd -ServerInstance '.' -Query @"
-SELECT name, state_desc, recovery_model_desc
-FROM sys.databases
-WHERE name NOT IN ('master','model','msdb','tempdb')
-ORDER BY name;
-"@
+# Verify ONLINE
+Invoke-Sqlcmd -ServerInstance '.' -Query "
+    SELECT name, state_desc, recovery_model_desc
+    FROM sys.databases
+    WHERE name NOT IN ('master','model','msdb','tempdb')
+    ORDER BY name;"
 ```
 
 ### Step 10 — Post-Restore: Fix Orphan Users, Sync Logins, Rename Instance
@@ -2195,22 +2293,39 @@ sudo rm -f /vm-storage-02/libvirt-images/AgHost-1A_E_Drive-${SNAP_NAME}.qcow2
 echo "Backup qcow2 deleted"
 ```
 
-### Restore + PITR Summary
+### Restore + Warm-Standby Summary
+
+There are **two phases**: a one-time Initial Restore, and an ongoing Warm-Standby cycle.
+
+#### Phase 1 — Initial Restore (done once per snapshot)
 
 | Step | Where | Action |
 |---|---|---|
 | 1a | AgHost-1A (SQL) | Ensure `FULL` recovery model for all databases |
-| 1b | AgHost-1A (SQL) | `BACKUP DATABASE` → `E:\Backups\<db>_<ts>.bak` (SQL 2019) / `SUSPEND_FOR_SNAPSHOT_BACKUP` + `METADATA_ONLY` (SQL 2022) |
-| 1c | AgHost-1A (SQL Agent) | Scheduled T-log backups every 15–30 min → `E:\TLogBackups\` |
-| 2 | ryzen9 | E:\ only VSS snapshot (captures `.bak` + MDF/LDF) → copy qcow2 to `/vm-storage-02/` |
+| 1b | AgHost-1A (SQL) | `BACKUP DATABASE` → `E:\Backups\<db>_<ts>.bak` immediately before snapshot |
+| 1c | AgHost-1A (SQL Agent) | Scheduled T-log backups every **15 minutes** → `E:\TLogBackups\` |
+| 2 | ryzen9 | E:\ only VSS snapshot (captures `.bak` + MDF/LDF + T-logs) → `rsync` qcow2 to `/vm-storage-02/` |
 | 3 | ryzen9 | `virsh attach-device SqlPoc vdd.xml --live` (with `<readonly/>`) |
 | 4 | SqlPoc (PowerShell) | Bring disk online read-only → assign `T:\` |
 | 5 | SqlPoc (PowerShell) | Copy `.bak` from `T:\Backups\` to local `E:\Backups\` |
-| 6 | SqlPoc (SQL) | `RESTORE DATABASE WITH NORECOVERY` from `.bak` → DB in **RESTORING** (no crash recovery, LSN preserved) |
-| 7 | SqlPoc (PowerShell) | Filter post-backup T-logs with `StartsWith` → `RESTORE LOG WITH NORECOVERY, STOPAT` |
-| 8 | SqlPoc (PowerShell) | Parallel `RESTORE DATABASE WITH RECOVERY` per DB → **ONLINE** at target timestamp |
-| 9 | SqlPoc (SQL) | Fix orphan users, sync logins, rename instance |
-| 10 | SqlPoc + ryzen9 | Remove `T:\` → offline disk → `virsh detach-device` → delete qcow2 |
+| 6 | SqlPoc (SQL) | `RESTORE DATABASE WITH NORECOVERY` from `.bak` → DB in **RESTORING** (LSN preserved, no crash recovery) |
+| 7 | SqlPoc (PowerShell) | Initial T-log catch-up: copy + apply all post-backup T-logs `WITH NORECOVERY` (no STOPAT) |
+| — | SqlPoc + ryzen9 | Remove `T:\` → offline disk → `virsh detach-device` (can keep qcow2 for reference) |
+
+#### Phase 2 — Ongoing Warm-Standby (every 15 minutes, automatic)
+
+| Step | Where | Action |
+|---|---|---|
+| 8 | SqlPoc (Task Scheduler) | `Apply-TLogs.ps1`: copy only NEW `.trn` files from `\\AGHOST-1A\E$\TLogBackups` → `RESTORE LOG WITH NORECOVERY` → DB stays **RESTORING** |
+
+#### Phase 3 — On-Demand Recovery (failover / DR test only)
+
+| Step | Where | Action |
+|---|---|---|
+| 9 | SqlPoc (SQL) | Optional: `RESTORE LOG WITH NORECOVERY, STOPAT='<time>'` if stopping at specific point |
+| 9 | SqlPoc (PowerShell) | `RESTORE DATABASE WITH RECOVERY` → DB **ONLINE** ⚠️ terminates log chain |
+| 10 | SqlPoc (SQL) | Fix orphan users, sync logins, rename instance |
+| 11 | SqlPoc + ryzen9 | `virsh detach-device` → delete qcow2 → **new snapshot needed to restart cycle** |
 
 ---
 
@@ -2227,6 +2342,7 @@ some from known SQL Server VSS restore patterns.
 | **P4** | DB was SIMPLE recovery before snapshot | No T-log chain exists from source — `RESTORE LOG` fails | Ensure `FULL` recovery and run Step 1b (`BACKUP DATABASE`) before taking the snapshot |
 | **P5** | WinRM 413 for large file transfer | Base64-encoded files (>5 MB) exceed WinRM envelope limit | Copy T-logs via SMB admin share (`\\AGHOST-1A\E$\TLogBackups`) |
 | **P6** ⚠️ | `FOR ATTACH` used instead of `RESTORE WITH NORECOVERY` | Crash recovery runs → LSN diverges → all subsequent `RESTORE LOG` commands fail with *"LSN terminates too early"* | Always use `RESTORE DATABASE ... WITH NORECOVERY` from the `.bak` inside the snapshot |
+| **P7** | `RESTORE DATABASE WITH RECOVERY` called in the repeating job | Terminates the log chain — no more T-logs can ever be applied to this database | Call `RESTORE WITH RECOVERY` only on explicit failover/DR test (Phase 3) |
 | **B1** | Fixed sleep durations in recovery loop | Too short on slow systems, wasteful on fast | `Wait-Job -Timeout 600` + poll loop |
 | **B4** ⚠️ | `"Sales" -in $filename` substring match | Matches "SalesArchive" and "SalesTemp" → **wrong T-logs → silent data corruption** | `$file.Name.ToLower().StartsWith($db.ToLower() + '_')` |
 | **B9** | No try/catch on `RESTORE LOG` | Silent T-log failures leave DB in broken unknown state | `try/catch` + `break` + explicit error per file |
