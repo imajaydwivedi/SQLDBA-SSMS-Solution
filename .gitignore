@@ -24,3 +24,84 @@ Untitled*.txt
 .DS_Store
 .ssms_suo
 .vs/SQLDBA-SSMS Solution/FileContentIndex/
+.env
+.venv
+.private
+.temp
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+wheels/
+sdist/
+develop-eggs/
+.eggs/
+lib/
+lib64/
+parts/
+var/
+*.so
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+.python-version
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+profile_default/
+ipython_config.py
+
+# Testing & coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+
+# Type checkers & linters
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.pyre/
+.ruff_cache/
+
+# Package managers
+pip-log.txt
+pip-delete-this-directory.txt
+poetry.lock
+Pipfile.lock
+
+# Distribution / packaging
+*.manifest
+*.spec
+
+# pyenv
+.python-version
+
+# .NET build artifacts (VssBackup / VssRestore requesters)
+**/bin/
+**/obj/
+Backup-Restore-VSS/VssRequester/publish/

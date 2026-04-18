@@ -1,0 +1,14 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>VssBackup</AssemblyName>
+    <RootNamespace>VssRequester.Backup</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ArxOne.AlphaVSS" Version="2.2.1" />
+    <PackageReference Include="ArxOne.AlphaVSS.Native.NetCore" Version="2.2.1" />
+  </ItemGroup>
+
+</Project>
