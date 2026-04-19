@@ -12,12 +12,20 @@ Steps:
      RESTORE LOG the fresh file.
   4. RESTORE WITH RECOVERY and read the marker row back to prove success.
 """
-import sys, datetime, os, ntpath, subprocess, time
+import sys, datetime, os, ntpath, subprocess, time, argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from winrm_helper import run_ps, sqlcmd, pull_file, SA_PWD
 
-db = sys.argv[1] if len(sys.argv) > 1 else "Db2"
-ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+ap = argparse.ArgumentParser(description="Verify / bridge the T-log chain for a VSS-restored DB.")
+ap.add_argument("db",       nargs="?", default="Db2",
+                help="Database name on SqlPoc (default: Db2)")
+ap.add_argument("--stopat", default=None,
+                help="PITR timestamp for RESTORE WITH RECOVERY, STOPAT (YYYY-MM-DDTHH:MM:SS). "
+                     "Leave blank to recover to latest LSN.")
+args = ap.parse_args()
+db     = args.db
+stopat = args.stopat          # None → full recovery; set → PITR
+ts     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 share_unc = r"\\192.168.122.1\vss-transport\tlog_verify"
 share_lin = "/hyperactive/vss-transport/tlog_verify"
 tlog_src  = r"E:\TLogBackups"
@@ -161,10 +169,15 @@ print(must("SqlPoc",
     f"WITH NORECOVERY, STATS = 10;",
     "final RESTORE LOG NORECOVERY", timeout=180))
 
-print(f"--- 6. WITH RECOVERY -> ONLINE, then read marker row ---")
-print(must("SqlPoc", f"RESTORE DATABASE [{db}] WITH RECOVERY;", "WITH RECOVERY", timeout=60))
+print(f"--- 6. WITH RECOVERY -> ONLINE {'(PITR: ' + stopat + ')' if stopat else ''} ---")
+recovery_clause = f"WITH RECOVERY, STOPAT = '{stopat}'" if stopat else "WITH RECOVERY"
+print(must("SqlPoc", f"RESTORE DATABASE [{db}] {recovery_clause};",
+           "WITH RECOVERY", timeout=60))
 print(must("SqlPoc",
     f"SELECT name, state_desc FROM sys.databases WHERE name='{db}';", "online state"))
-print(must("SqlPoc", f"SELECT note, ts FROM [{db}].dbo._vss_marker ORDER BY ts DESC;",
-    "marker read"))
-print("*** PURE-VSS T-LOG CHAIN VERIFIED ***")
+if stopat:
+    print(f"*** PURE-VSS PITR RESTORE to {stopat} VERIFIED ***")
+else:
+    print(must("SqlPoc", f"SELECT note, ts FROM [{db}].dbo._vss_marker ORDER BY ts DESC;",
+               "marker read"))
+    print("*** PURE-VSS T-LOG CHAIN VERIFIED ***")

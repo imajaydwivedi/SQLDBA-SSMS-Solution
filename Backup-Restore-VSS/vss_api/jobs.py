@@ -1,0 +1,103 @@
+"""Background job manager with asyncio WebSocket broadcasting.
+
+Each job runs in a daemon thread (so long-running WinRM calls don't block
+the event loop).  Progress lines are pushed to per-subscriber asyncio.Queues
+so the WebSocket endpoint can stream them to the browser in real time.
+"""
+import asyncio, subprocess, uuid, datetime, threading
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Set
+
+
+@dataclass
+class Job:
+    id:          str
+    type:        str           # "backup" | "restore"
+    label:       str
+    status:      str = "pending"   # pending | running | done | failed
+    lines:       List[str] = field(default_factory=list)
+    started_at:  Optional[str] = None
+    finished_at: Optional[str] = None
+    exit_code:   Optional[int] = None
+
+
+class JobStore:
+    def __init__(self):
+        self._jobs: Dict[str, Job] = {}
+        self._subs: Dict[str, Set[asyncio.Queue]] = {}
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._lock = threading.Lock()
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+
+    def create(self, type_: str, label: str) -> Job:
+        jid = str(uuid.uuid4())[:8]
+        job = Job(id=jid, type=type_, label=label)
+        with self._lock:
+            self._jobs[jid] = job
+            self._subs[jid] = set()
+        return job
+
+    def get(self, jid: str) -> Optional[Job]:
+        return self._jobs.get(jid)
+
+    def all(self) -> List[Job]:
+        return sorted(self._jobs.values(),
+                      key=lambda j: j.started_at or "", reverse=True)
+
+    # ── internal ────────────────────────────────────────────────────────────
+    def _push(self, jid: str, line: str) -> None:
+        if not self._loop:
+            return
+        with self._lock:
+            subs = set(self._subs.get(jid, []))
+        for q in subs:
+            asyncio.run_coroutine_threadsafe(q.put(line), self._loop)
+
+    # ── WebSocket subscription ───────────────────────────────────────────────
+    def subscribe(self, jid: str) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue()
+        with self._lock:
+            self._subs.setdefault(jid, set()).add(q)
+        return q
+
+    def unsubscribe(self, jid: str, q: asyncio.Queue) -> None:
+        with self._lock:
+            self._subs.get(jid, set()).discard(q)
+
+    # ── subprocess execution (runs in a daemon thread) ───────────────────────
+    def run_subprocess(self, job: Job, cmd: List[str], cwd: str = None) -> None:
+        def _run():
+            job.status     = "running"
+            job.started_at = datetime.datetime.now().isoformat(timespec="seconds")
+            self._push(job.id, f"[VSS-GUI] cmd: {' '.join(cmd)}\n")
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    cwd=cwd,
+                )
+                for line in proc.stdout:
+                    job.lines.append(line)
+                    self._push(job.id, line)
+                proc.wait()
+                job.exit_code = proc.returncode
+                job.status    = "done" if proc.returncode == 0 else "failed"
+            except Exception as exc:
+                msg = f"[VSS-GUI error] {exc}\n"
+                job.lines.append(msg)
+                self._push(job.id, msg)
+                job.status = "failed"
+            finally:
+                job.finished_at = datetime.datetime.now().isoformat(timespec="seconds")
+                self._push(job.id, "__DONE__\n")
+
+        threading.Thread(target=_run, daemon=True).start()
+
+
+# Module-level singleton shared by server.py and the WebSocket endpoint
+store = JobStore()
