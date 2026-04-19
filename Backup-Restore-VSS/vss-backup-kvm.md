@@ -817,6 +817,7 @@ http://192.168.122.1:8765
 | `POST` | `/api/servers` | Add a new server `{key, ip, user, pwd, role}` |
 | `DELETE` | `/api/servers/{key}` | Remove an added server |
 | `GET`  | `/api/databases?host=<key>` | Query `sys.databases` on a server via WinRM |
+| `GET`  | `/api/databases/exists?host=<key>&names=a,b,c` | Return which of the given names already exist on `<key>` (used by the Restore tab's conflict check) |
 | `GET`  | `/api/snapshots` | List snapshot folders on the transport share |
 | `POST` | `/api/jobs/backup` | Start a backup job (see payload below) |
 | `POST` | `/api/jobs/restore` | Start a restore job (see payload below) |
@@ -841,15 +842,29 @@ http://192.168.122.1:8765
 {
   "snapshot":   "my_backup_20260419_120000",
   "target":     "SqlPoc",
-  "databases":  ["CDCDemo"],
+  "databases":  ["CDCDemo", "Db2"],
+  "rename":     { "Db2": "Db2_Copy" },
+  "overwrite":  false,
+  "source":     "AgHost-1A",
   "parallel":   1,
   "with_tlog":  true,
   "pitr":       "2026-04-19 14:30:00"
 }
 ```
-`pitr` is optional — omit or set to `null` to recover to the latest LSN.
-When set, `verify_tlog_chain.py` issues
-`RESTORE DATABASE … WITH RECOVERY, STOPAT = '<pitr>'`.
+
+Field reference:
+
+| Field | Purpose |
+|-------|---------|
+| `target` | Host key of the SQL server where the restore lands. May be the **same** as the backup source (overwrite in place) or a **different** server. |
+| `rename` | Optional `{original: new_name}` map. After `VssRestore.exe` finishes, each listed DB is renamed via `ALTER DATABASE … MODIFY NAME`. Entries where the original name was not selected in `databases`, or where `new_name == original`, are ignored. |
+| `overwrite` | If any DB name on `target` would collide with an original **or** renamed name, `restore.py` aborts with exit code `2` unless this flag is `true` — then the conflicting DBs are dropped first. |
+| `source` | Host key of the server that owns the agent-job `.trn` files, passed to `verify_tlog_chain.py` via `--source`. Only used when `with_tlog` is true. Defaults to `AgHost-1A`. |
+| `pitr`   | Optional PITR timestamp — omit or `null` to recover to the latest LSN. When set, `verify_tlog_chain.py` issues `RESTORE DATABASE … WITH RECOVERY, STOPAT = '<pitr>'`. |
+
+`restore.py` exit codes:
+`0` ok · `1` usage/snapshot error · `2` name conflict (no `--overwrite`) ·
+`3` `VssRestore.exe` failed · `4` T-log verify failed · `5` rename/recovery failed.
 
 ### 13.4 GUI features
 
@@ -857,7 +872,7 @@ When set, `verify_tlog_chain.py` issues
 |---------|---------|
 | **SQL Server sidebar** | Lists all servers from `.venv/config.env`; supports adding/removing extra servers at runtime |
 | **Backup tab** | Source server picker → live DB list (state + recovery model); compress toggle; parallel slider 1–10; optional T-log verify |
-| **Restore tab** | Snapshot dropdown (sorted newest-first with DB list); target server picker; DB checkboxes; parallel slider; T-log chain toggle; PITR datetime picker |
+| **Restore tab** | Snapshot dropdown (sorted newest-first with DB list); target server picker (same-or-different); per-DB **rename** textbox; **Overwrite existing** toggle; live conflict banner that queries `/api/databases/exists` against the target; T-log chain toggle with T-log source dropdown; parallel slider; PITR datetime picker |
 | **Jobs tab** | Full job history table with type/status badges and per-job log button |
 | **Progress modal** | Terminal-style dark log panel; WebSocket streams output in real time; shows exit code on completion |
 | **Running badge** | Header badge pulses while any job is in-flight (auto-refreshes every 4 s) |

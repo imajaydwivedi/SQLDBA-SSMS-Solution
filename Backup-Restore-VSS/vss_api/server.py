@@ -11,7 +11,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 HERE     = os.path.dirname(os.path.abspath(__file__))
 VSS_ROOT = os.path.dirname(HERE)
@@ -78,6 +78,30 @@ def api_databases(host: str):
     return rows
 
 
+@app.get("/api/databases/exists")
+def api_databases_exists(host: str, names: str):
+    """Return which of the comma-separated ``names`` currently exist on ``host``.
+
+    Used by the Restore tab to warn the user about collisions before
+    submitting the job (server-side re-check is performed by restore.py).
+    """
+    wanted = [n.strip() for n in names.split(",") if n.strip()]
+    if not wanted:
+        return {"existing": [], "checked": []}
+    qlist = ",".join("'" + n.replace("'", "''") + "'" for n in wanted)
+    out, err, rc = sqlcmd(host,
+        f"SELECT name FROM sys.databases WHERE name IN ({qlist}) ORDER BY name")
+    if rc != 0:
+        raise HTTPException(500, err[:400])
+    wset = set(wanted)
+    existing = []
+    for line in out.splitlines():
+        tok = line.strip()
+        if tok in wset:
+            existing.append(tok)
+    return {"existing": sorted(set(existing)), "checked": wanted}
+
+
 # ── Snapshots ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/snapshots")
@@ -109,9 +133,12 @@ class RestoreReq(BaseModel):
     snapshot:  str
     target:    str
     databases: Optional[List[str]] = None
+    rename:    Optional[Dict[str, str]] = None   # {original: new_name}
+    overwrite: bool = False
+    source:    Optional[str] = None              # tlog-bridge source host
     parallel:  int  = 1
     with_tlog: bool = True
-    pitr:      Optional[str] = None   # "YYYY-MM-DDTHH:MM:SS"
+    pitr:      Optional[str] = None              # "YYYY-MM-DDTHH:MM:SS"
 
 
 @app.post("/api/jobs/backup", status_code=202)
@@ -132,6 +159,11 @@ def api_restore(r: RestoreReq):
     script = os.path.join(HERE, "runners", "restore.py")
     cmd    = ["python3", "-u", script, r.snapshot, r.target]
     if r.databases:   cmd += ["--databases", ",".join(r.databases)]
+    if r.rename:
+        pairs = [f"{k}={v}" for k, v in r.rename.items() if k and v and k != v]
+        if pairs:    cmd += ["--rename", ",".join(pairs)]
+    if r.overwrite:   cmd.append("--overwrite")
+    if r.source:      cmd += ["--source", r.source]
     if r.parallel > 1: cmd += ["--parallel", str(r.parallel)]
     if r.with_tlog:   cmd.append("--with-tlog")
     if r.pitr:        cmd += ["--stopat", r.pitr]

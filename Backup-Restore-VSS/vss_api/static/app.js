@@ -12,6 +12,8 @@ document.addEventListener("DOMContentLoaded", () => {
   _addServerModal = new bootstrap.Modal(document.getElementById("addServerModal"));
   loadServers();
   loadSnapshots();
+  document.getElementById("rstOverwrite")
+          .addEventListener("change", refreshRestoreConflicts);
   setInterval(refreshRunningBadge, 4000);
 });
 
@@ -46,15 +48,21 @@ function renderSidebar() {
 }
 
 function populateDropdowns() {
-  ["bkpSource", "rstTarget"].forEach(id => {
+  ["bkpSource", "rstTarget", "rstTlogSource"].forEach(id => {
     const sel = document.getElementById(id);
+    if (!sel) return;
     const prev = sel.value;
     sel.innerHTML = "";
     for (const key of Object.keys(_servers)) {
-      const opt = new Option(key, key);
-      sel.appendChild(opt);
+      sel.appendChild(new Option(key, key));
     }
-    if (prev && sel.querySelector(`option[value="${prev}"]`)) sel.value = prev;
+    if (prev && sel.querySelector(`option[value="${prev}"]`)) {
+      sel.value = prev;
+    } else if (id === "rstTlogSource") {
+      // Default the T-log source to the first server tagged "source"
+      const src = Object.entries(_servers).find(([,s]) => s.role === "source");
+      if (src) sel.value = src[0];
+    }
   });
 }
 
@@ -137,11 +145,79 @@ async function loadSnapshotDbs() {
     el.innerHTML = '<small class="text-muted">No databases in this snapshot</small>'; return;
   }
   el.innerHTML = snap.databases.map(db => `
-    <div class="form-check py-0">
-      <input class="form-check-input db-check" type="checkbox" value="${db}"
-             id="rst_db_${db}" checked>
-      <label class="form-check-label" for="rst_db_${db}" style="font-size:13px">${db}</label>
+    <div class="d-flex align-items-center gap-2 py-0" data-orig="${db}">
+      <div class="form-check mb-0" style="min-width:180px">
+        <input class="form-check-input db-check" type="checkbox" value="${db}"
+               id="rst_db_${db}" checked onchange="refreshRestoreConflicts()">
+        <label class="form-check-label" for="rst_db_${db}" style="font-size:13px">${db}</label>
+      </div>
+      <i class="bi bi-arrow-right text-muted"></i>
+      <input type="text" class="form-control form-control-sm db-rename" value="${db}"
+             data-orig="${db}" oninput="refreshRestoreConflicts()"
+             placeholder="new name (edit to rename)"
+             style="font-size:12px;max-width:220px">
     </div>`).join("");
+  refreshRestoreConflicts();
+}
+
+// Map of {orig_db_name: effective_name} — unchanged names are kept as orig
+function collectEffectiveNames() {
+  const map = {};
+  document.querySelectorAll("#rstDbList .db-check:checked").forEach(chk => {
+    const orig = chk.value;
+    const inp  = document.querySelector(`#rstDbList .db-rename[data-orig="${orig}"]`);
+    const newN = (inp && inp.value.trim()) || orig;
+    map[orig] = newN;
+  });
+  return map;
+}
+
+// Return only real renames (orig != new)
+function collectRenameMap() {
+  const m = {};
+  for (const [orig, nn] of Object.entries(collectEffectiveNames())) {
+    if (nn && nn !== orig) m[orig] = nn;
+  }
+  return m;
+}
+
+function onRestoreTargetChange() { refreshRestoreConflicts(); }
+
+function onTlogToggle() {
+  const on = document.getElementById("rstTlog").checked;
+  document.getElementById("pitrSection").style.display  = on ? "" : "none";
+  document.getElementById("tlogSection").style.display  = on ? "" : "none";
+}
+
+// Query /api/databases/exists for the effective target names and update the
+// conflict warning banner.
+let _conflictCallToken = 0;
+async function refreshRestoreConflicts() {
+  const box = document.getElementById("rstConflictBox");
+  const msg = document.getElementById("rstConflictMsg");
+  const target = document.getElementById("rstTarget").value;
+  const eff    = collectEffectiveNames();
+  const names  = Object.values(eff);
+  if (!target || !names.length) { box.classList.add("d-none"); return; }
+  const token = ++_conflictCallToken;
+  try {
+    const url = `/api/databases/exists?host=${encodeURIComponent(target)}`
+              + `&names=${encodeURIComponent(names.join(","))}`;
+    const r   = await fetch(url);
+    if (token !== _conflictCallToken) return;
+    const j   = await r.json();
+    const hits = (j.existing || []);
+    if (!hits.length) { box.classList.add("d-none"); return; }
+    const overwrite = document.getElementById("rstOverwrite").checked;
+    msg.innerHTML = `On <b>${target}</b> these databases already exist: `
+                  + `<code>${hits.join(", ")}</code>. `
+                  + (overwrite
+                      ? "They will be <b>dropped</b> before restore."
+                      : "Enable <b>Overwrite</b> or rename to avoid collision.");
+    box.classList.toggle("alert-warning", !overwrite);
+    box.classList.toggle("alert-danger",  !overwrite);
+    box.classList.remove("d-none");
+  } catch { box.classList.add("d-none"); }
 }
 
 // ── Backup ────────────────────────────────────────────────────────────────────
@@ -167,13 +243,44 @@ async function startRestore() {
   const snap = document.getElementById("rstSnapshot").value;
   if (!snap) { alert("Select a snapshot."); return; }
   const dbs  = getCheckedDbs("rstDbList");
-  const pitrRaw = document.getElementById("rstPitr").value;
+  if (!dbs.length) { alert("Select at least one database to restore."); return; }
+  const pitrRaw   = document.getElementById("rstPitr").value;
+  const target    = document.getElementById("rstTarget").value;
+  const overwrite = document.getElementById("rstOverwrite").checked;
+  const withTlog  = document.getElementById("rstTlog").checked;
+  const source    = document.getElementById("rstTlogSource").value;
+  const renameMap = collectRenameMap();
+  const effective = collectEffectiveNames();
+
+  // Client-side pre-flight conflict check — gives immediate feedback; the
+  // restore runner repeats the check server-side.
+  try {
+    const url = `/api/databases/exists?host=${encodeURIComponent(target)}`
+              + `&names=${encodeURIComponent(Object.values(effective).join(","))}`;
+    const r   = await fetch(url);
+    const j   = await r.json();
+    const hits = (j.existing || []);
+    if (hits.length && !overwrite) {
+      alert(`Cannot restore: these databases already exist on ${target}:\n`
+          + `  ${hits.join(", ")}\n\n`
+          + `Enable "Overwrite existing databases" or rename to avoid collision.`);
+      return;
+    }
+    if (hits.length && overwrite) {
+      if (!confirm(`The following databases will be DROPPED on ${target} `
+                 + `before restore:\n  ${hits.join(", ")}\n\nProceed?`)) return;
+    }
+  } catch (e) { /* best-effort; server does the authoritative check */ }
+
   const body = {
     snapshot:  snap,
-    target:    document.getElementById("rstTarget").value,
-    databases: dbs.length ? dbs : null,
+    target,
+    databases: dbs,
+    rename:    Object.keys(renameMap).length ? renameMap : null,
+    overwrite,
+    source:    withTlog ? (source || null) : null,
     parallel:  +document.getElementById("rstParallel").value,
-    with_tlog: document.getElementById("rstTlog").checked,
+    with_tlog: withTlog,
     pitr:      pitrRaw ? pitrRaw.replace("T"," ") : null,
   };
   const r = await fetch("/api/jobs/restore", { method: "POST",

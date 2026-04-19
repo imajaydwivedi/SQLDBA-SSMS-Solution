@@ -18,13 +18,21 @@ from winrm_helper import run_ps, sqlcmd, pull_file, SA_PWD
 
 ap = argparse.ArgumentParser(description="Verify / bridge the T-log chain for a VSS-restored DB.")
 ap.add_argument("db",       nargs="?", default="Db2",
-                help="Database name on SqlPoc (default: Db2)")
+                help="Database name on <target> (default: Db2)")
 ap.add_argument("--stopat", default=None,
                 help="PITR timestamp for RESTORE WITH RECOVERY, STOPAT (YYYY-MM-DDTHH:MM:SS). "
                      "Leave blank to recover to latest LSN.")
-args = ap.parse_args()
+ap.add_argument("--target", default="SqlPoc",
+                help="Host key (winrm_helper.HOSTS) of the server where the DB is "
+                     "in RESTORING state (default: SqlPoc).")
+ap.add_argument("--source", default="AgHost-1A",
+                help="Host key of the server where the agent-job .trn files live "
+                     "(default: AgHost-1A).")
+args   = ap.parse_args()
 db     = args.db
 stopat = args.stopat          # None → full recovery; set → PITR
+TARGET = args.target
+SOURCE = args.source
 ts     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 share_unc = r"\\192.168.122.1\vss-transport\tlog_verify"
 share_lin = "/hyperactive/vss-transport/tlog_verify"
@@ -67,9 +75,9 @@ def _rows(host, query, columns, timeout=60):
     return rows, ""
 
 def read_header(trn_path):
-    """Return (FirstLSN, LastLSN) strings for a .trn file on AgHost-1A."""
+    """Return (FirstLSN, LastLSN) strings for a .trn file on SOURCE."""
     esc = trn_path.replace("'", "''")
-    rows, _ = _rows("AgHost-1A",
+    rows, _ = _rows(SOURCE,
         f"RESTORE HEADERONLY FROM DISK = N'{esc}'",
         ["FirstLSN", "LastLSN"], timeout=30)
     return (rows[0][0], rows[0][1]) if rows else (None, None)
@@ -83,7 +91,7 @@ def current_redo_lsn(retries=6, delay=2.0):
     so the caller sees a stable value before giving up.
     """
     for _ in range(retries):
-        rows, _ = _rows("SqlPoc",
+        rows, _ = _rows(TARGET,
             f"SELECT TOP 1 CAST(redo_start_lsn AS VARCHAR(40)) AS redo_lsn "
             f"FROM sys.master_files "
             f"WHERE DB_NAME(database_id)='{db}' AND redo_start_lsn IS NOT NULL",
@@ -94,15 +102,15 @@ def current_redo_lsn(retries=6, delay=2.0):
     return None
 
 def bridge_from_source(label):
-    """Pull any .trn files from AgHost-1A whose LastLSN exceeds the DB's
-    current redo_start_lsn and RESTORE LOG them on SqlPoc in order.
+    """Pull any .trn files from SOURCE whose LastLSN exceeds the DB's
+    current redo_start_lsn and RESTORE LOG them on TARGET in order.
     Returns list of applied file names.
     """
     cur = current_redo_lsn()
     if not cur:
         print(f"    [{label}] could not read redo_start_lsn; nothing to bridge"); return []
     print(f"    [{label}] redo_start_lsn = {cur}")
-    out, _, _ = run_ps("AgHost-1A",
+    out, _, _ = run_ps(SOURCE,
         f"Get-ChildItem '{tlog_src}' -Filter '{db}_*.trn' -EA SilentlyContinue "
         f"| Sort Name | Select -ExpandProperty FullName")
     files = [l.strip() for l in out.splitlines() if l.strip().lower().endswith(".trn")]
@@ -127,34 +135,34 @@ def bridge_from_source(label):
         base = ntpath.basename(f)
         local_dst = os.path.join(share_lin, base)
         try:
-            pull_file("AgHost-1A", f, local_dst)
+            pull_file(SOURCE, f, local_dst)
         except Exception as ex:
             print(f"    [{label}] FAIL pull {base}: {ex}"); sys.exit(4)
         print(f"    [{label}] + {base}  first={first}  last={last}")
-        must("SqlPoc",
+        must(TARGET,
             f"RESTORE LOG [{db}] FROM DISK = N'{share_unc}\\{base}' WITH NORECOVERY;",
             f"restore {base}", timeout=600)
         applied.append(base)
     print(f"    [{label}] applied {len(applied)} bridge file(s); new redo_start_lsn = {current_redo_lsn()}")
     return applied
 
-print(f"--- 0. Pre-state on SqlPoc for [{db}] ---")
-print(must("SqlPoc",
+print(f"--- 0. Pre-state on {TARGET} for [{db}] ---")
+print(must(TARGET,
     f"SELECT name, state_desc FROM sys.databases WHERE name='{db}';", "pre-state"))
 
-print(f"--- 1. Bridge agent-job .trn files from AgHost-1A -> SqlPoc ---")
+print(f"--- 1. Bridge agent-job .trn files from {SOURCE} -> {TARGET} ---")
 bridge_from_source("pre-marker")
 
-print(f"--- 2. Insert marker row on AgHost-1A ---")
-print(must("AgHost-1A",
+print(f"--- 2. Insert marker row on {SOURCE} ---")
+print(must(SOURCE,
     f"USE [{db}]; "
     f"IF OBJECT_ID('dbo._vss_marker','U') IS NULL "
     f"  CREATE TABLE dbo._vss_marker(ts DATETIME2 DEFAULT SYSUTCDATETIME(), note NVARCHAR(128)); "
     f"INSERT dbo._vss_marker(note) VALUES ('tlog_verify {ts}'); "
     f"SELECT COUNT(*) AS rows_in_marker FROM dbo._vss_marker;", "marker insert"))
 
-print(f"--- 3. Fresh BACKUP LOG on AgHost-1A to {share_unc} ---")
-print(must("AgHost-1A",
+print(f"--- 3. Fresh BACKUP LOG on {SOURCE} to {share_unc} ---")
+print(must(SOURCE,
     f"BACKUP LOG [{db}] TO DISK = N'{share_unc}\\{trn_name}' "
     f"WITH INIT, FORMAT, COMPRESSION, NAME = N'vss_verify {ts}';",
     "BACKUP LOG", timeout=180))
@@ -164,20 +172,20 @@ print(f"--- 4. Re-bridge (covers any agent-job runs during backup) ---")
 bridge_from_source("post-backup")
 
 print(f"--- 5. RESTORE LOG fresh file WITH NORECOVERY ---")
-print(must("SqlPoc",
+print(must(TARGET,
     f"RESTORE LOG [{db}] FROM DISK = N'{share_unc}\\{trn_name}' "
     f"WITH NORECOVERY, STATS = 10;",
     "final RESTORE LOG NORECOVERY", timeout=180))
 
 print(f"--- 6. WITH RECOVERY -> ONLINE {'(PITR: ' + stopat + ')' if stopat else ''} ---")
 recovery_clause = f"WITH RECOVERY, STOPAT = '{stopat}'" if stopat else "WITH RECOVERY"
-print(must("SqlPoc", f"RESTORE DATABASE [{db}] {recovery_clause};",
+print(must(TARGET, f"RESTORE DATABASE [{db}] {recovery_clause};",
            "WITH RECOVERY", timeout=60))
-print(must("SqlPoc",
+print(must(TARGET,
     f"SELECT name, state_desc FROM sys.databases WHERE name='{db}';", "online state"))
 if stopat:
     print(f"*** PURE-VSS PITR RESTORE to {stopat} VERIFIED ***")
 else:
-    print(must("SqlPoc", f"SELECT note, ts FROM [{db}].dbo._vss_marker ORDER BY ts DESC;",
+    print(must(TARGET, f"SELECT note, ts FROM [{db}].dbo._vss_marker ORDER BY ts DESC;",
                "marker read"))
     print("*** PURE-VSS T-LOG CHAIN VERIFIED ***")
