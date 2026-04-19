@@ -85,11 +85,18 @@ def run_ps(host_key, script, timeout=None):
     r = s.run_ps(script)
     return r.std_out.decode("utf-8", "replace"), r.std_err.decode("utf-8", "replace"), r.status_code
 
-def sqlcmd(host_key, query, timeout=60, sa=True):
-    """Run a T-SQL query via Invoke-Sqlcmd on the named host (uses sa by default)."""
+def sqlcmd(host_key, query, timeout=60, sa=True, database="master"):
+    """Run a T-SQL query via Invoke-Sqlcmd on the named host (uses sa by default).
+
+    ``database`` defaults to ``master`` so the connection never depends on the
+    login's default_database_name -- which can transiently point at a DB that
+    is RESTORING/OFFLINE during the pure-VSS restore phases and would otherwise
+    cause login-time "Database ... cannot be opened" errors.
+    """
     auth = f"-Username 'sa' -Password '{SA_PWD}'" if sa else ""
     script = (
-        f"Invoke-Sqlcmd -ServerInstance '.' {auth} -Query @'\n{query}\n'@ "
+        f"Invoke-Sqlcmd -ServerInstance '.' {auth} -Database '{database}' "
+        f"-Query @'\n{query}\n'@ "
         f"-QueryTimeout {timeout} -ErrorAction Stop | Format-Table -AutoSize | Out-String"
     )
     return run_ps(host_key, script)

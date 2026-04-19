@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Threading.Tasks;
 using ArxOne.Win32.Vss;
 
 namespace VssRequester.Backup;
@@ -11,11 +13,13 @@ namespace VssRequester.Backup;
 // Runs on the source VM (AgHost-1A). For each selected database:
 //   1. Ask VSS SQL Writer to freeze the DB (DoSnapshotSet)
 //   2. Copy MDF+LDF from the shadow-copy volume to the transport share
+//      (per-DB in parallel, optionally gzip-compressed on the fly)
 //   3. Persist the writer metadata XML so the restore requester can call
 //      PreRestore/PostRestore with SetAdditionalRestores(true)
 //
 // Usage:
 //   VssBackup.exe --databases CDCDemo,Db2 --output \\ryzen9\vss-transport\<ts>
+//                 [--compress] [--parallel N]
 
 internal static class Program
 {
@@ -27,7 +31,7 @@ internal static class Program
         try
         {
             var opts = ParseArgs(args);
-            Log($"=== VssBackup ===  dbs=[{string.Join(",", opts.Databases)}]  output={opts.Output}");
+            Log($"=== VssBackup ===  dbs=[{string.Join(",", opts.Databases)}]  output={opts.Output}  compress={opts.Compress}  parallel={opts.Parallel}");
             Directory.CreateDirectory(opts.Output);
 
             var factory = VssFactoryProvider.Default.GetVssFactory();
@@ -89,10 +93,15 @@ internal static class Program
                 Log($"Shadow: {kv.Key} -> {snap.SnapshotDeviceObject}");
             }
 
-            foreach (var c in selected)
+            var copySw = System.Diagnostics.Stopwatch.StartNew();
+            long totalSrc = 0, totalDst = 0;
+            var parOpts = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, opts.Parallel) };
+            Parallel.ForEach(selected, parOpts, c =>
             {
                 var dbDir = Path.Combine(opts.Output, c.ComponentName);
                 Directory.CreateDirectory(dbDir);
+                long dbSrc = 0, dbDst = 0;
+                var dbSw = System.Diagnostics.Stopwatch.StartNew();
                 foreach (var f in AllFiles(c))
                 {
                     // f.Path is the directory (e.g. "E:\...\DATA");
@@ -102,12 +111,29 @@ internal static class Program
                     var snapDir  = Path.Combine(snapPath[vol], relDir);
                     foreach (var match in Directory.EnumerateFiles(snapDir, f.FileSpecification))
                     {
-                        var dst = Path.Combine(dbDir, Path.GetFileName(match));
-                        Log($"  copy {match}  ->  {dst}");
-                        File.Copy(match, dst, true);
+                        var name = Path.GetFileName(match);
+                        var dst  = Path.Combine(dbDir, opts.Compress ? name + ".gz" : name);
+                        var srcLen = new FileInfo(match).Length;
+                        Log($"  [{c.ComponentName}] copy {match}  ->  {dst}");
+                        if (opts.Compress)
+                            CompressFile(match, dst);
+                        else
+                            BufferedCopy(match, dst);
+                        var dstLen = new FileInfo(dst).Length;
+                        System.Threading.Interlocked.Add(ref totalSrc, srcLen);
+                        System.Threading.Interlocked.Add(ref totalDst, dstLen);
+                        dbSrc += srcLen; dbDst += dstLen;
                     }
                 }
-            }
+                dbSw.Stop();
+                var mbps = dbSw.Elapsed.TotalSeconds > 0 ? (dbSrc / 1048576.0) / dbSw.Elapsed.TotalSeconds : 0;
+                var ratio = dbSrc > 0 ? (double)dbDst / dbSrc : 1.0;
+                Log($"  [{c.ComponentName}] done in {dbSw.Elapsed.TotalSeconds:F1}s  src={dbSrc / 1048576.0:F0}MB  dst={dbDst / 1048576.0:F0}MB  ratio={ratio:F2}  {mbps:F0} MB/s");
+            });
+            copySw.Stop();
+            var totalMbps = copySw.Elapsed.TotalSeconds > 0 ? (totalSrc / 1048576.0) / copySw.Elapsed.TotalSeconds : 0;
+            var totalRatio = totalSrc > 0 ? (double)totalDst / totalSrc : 1.0;
+            Log($"Copy phase: {copySw.Elapsed.TotalSeconds:F1}s  src={totalSrc / 1048576.0:F0}MB  dst={totalDst / 1048576.0:F0}MB  ratio={totalRatio:F2}  {totalMbps:F0} MB/s aggregate");
 
             File.WriteAllText(Path.Combine(opts.Output, "backup_components.xml"), bc.SaveAsXml());
             var wmDir = Path.Combine(opts.Output, "writer_metadata");
@@ -132,23 +158,48 @@ internal static class Program
         }
     }
 
-    private record Options(IReadOnlyList<string> Databases, string Output);
+    private record Options(IReadOnlyList<string> Databases, string Output, bool Compress, int Parallel);
 
     private static Options ParseArgs(string[] args)
     {
         string? dbs = null, output = null;
+        bool compress = false;
+        int? parallel = null;
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
             {
-                case "--databases": dbs    = args[++i]; break;
-                case "--output":    output = args[++i]; break;
+                case "--databases": dbs      = args[++i]; break;
+                case "--output":    output   = args[++i]; break;
+                case "--compress":  compress = true; break;
+                case "--parallel":  parallel = int.Parse(args[++i]); break;
                 default: throw new ArgumentException($"Unknown arg: {args[i]}");
             }
         }
         if (dbs == null || output == null)
-            throw new ArgumentException("Usage: VssBackup --databases X,Y --output <share-path>");
-        return new Options(dbs.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), output);
+            throw new ArgumentException(
+                "Usage: VssBackup --databases X,Y --output <share-path> [--compress] [--parallel N]");
+        var dbList = dbs.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var par = parallel ?? 1;
+        return new Options(dbList, output, compress, par);
+    }
+
+    // 1 MB buffers: good throughput over SMB for multi-GB SQL files.
+    private const int CopyBuf = 1 << 20;
+
+    private static void BufferedCopy(string src, string dst)
+    {
+        using var sin  = new FileStream(src, FileMode.Open,   FileAccess.Read,  FileShare.Read, CopyBuf, FileOptions.SequentialScan);
+        using var sout = new FileStream(dst, FileMode.Create, FileAccess.Write, FileShare.None, CopyBuf);
+        sin.CopyTo(sout, CopyBuf);
+    }
+
+    private static void CompressFile(string src, string dstGz)
+    {
+        using var sin  = new FileStream(src,   FileMode.Open,   FileAccess.Read,  FileShare.Read, CopyBuf, FileOptions.SequentialScan);
+        using var fout = new FileStream(dstGz, FileMode.Create, FileAccess.Write, FileShare.None, CopyBuf);
+        using var gz   = new GZipStream(fout, CompressionLevel.Fastest, leaveOpen: false);
+        sin.CopyTo(gz, CopyBuf);
     }
 
     private static void Log(string m)

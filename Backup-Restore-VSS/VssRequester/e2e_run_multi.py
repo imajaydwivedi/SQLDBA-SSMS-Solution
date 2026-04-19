@@ -1,10 +1,16 @@
 """
 Multi-DB Pure-VSS E2E runner.
 
-Usage:  python3 e2e_run_multi.py <label> <db1,db2,...> <with-tlog|no-tlog>
-Example:
+Usage:
+    python3 e2e_run_multi.py <label> <db1,db2,...> <with-tlog|no-tlog> [compress] [parallel=N]
+
+The optional trailing tokens can appear in any order:
+    compress     -> pass --compress to VssBackup.exe (gzip on the fly)
+    parallel=N   -> pass --parallel N to both requesters (default = DB count)
+
+Examples:
     python3 e2e_run_multi.py all_tlog  CDCDemo,Db2,DBA,Facebook  with-tlog
-    python3 e2e_run_multi.py pair_notl DBA,Facebook              no-tlog
+    python3 e2e_run_multi.py all_gz    CDCDemo,Db2,DBA,Facebook,StackOverflow2013  with-tlog  compress parallel=5
 """
 import sys, os, time, datetime, subprocess, textwrap
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +21,9 @@ from winrm_helper import run_ps, sqlcmd
 label   = sys.argv[1]
 dbs     = [d.strip() for d in sys.argv[2].split(",") if d.strip()]
 tlog    = sys.argv[3].lower() == "with-tlog"
+compress = any(a.lower() == "compress" for a in sys.argv[4:])
+par_args = [a for a in sys.argv[4:] if a.lower().startswith("parallel=")]
+parallel = int(par_args[0].split("=", 1)[1]) if par_args else 1
 ts      = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 share   = r"\\192.168.122.1\vss-transport"
 folder  = f"{label}_{ts}"
@@ -26,7 +35,7 @@ def banner(s):
 def section(s):
     print(); print("-" * 78); print(s); print("-" * 78)
 
-banner(f"E2E-MULTI  label={label}  dbs={dbs}  tlog={tlog}  ts={ts}")
+banner(f"E2E-MULTI  label={label}  dbs={dbs}  tlog={tlog}  compress={compress}  parallel={parallel}  ts={ts}")
 print(f"share  : {out_unc}")
 print(f"linux  : {out_lin}")
 
@@ -57,14 +66,21 @@ out,_,_ = sqlcmd("AgHost-1A",
     f"FROM sys.databases WHERE name IN ({qlist}) ORDER BY name")
 print(out)
 
-section("2. VssBackup.exe --databases " + ",".join(dbs))
+backup_extra = []
+if compress: backup_extra += ["'--compress'"]
+if parallel > 1: backup_extra += ["'--parallel'", f"'{parallel}'"]
+backup_extra_s = (", " + ", ".join(backup_extra)) if backup_extra else ""
+
+section("2. VssBackup.exe --databases " + ",".join(dbs) +
+        (" --compress" if compress else "") +
+        (f" --parallel {parallel}" if parallel > 1 else ""))
 script = textwrap.dedent(f"""
 $out = 'C:\\Scripts\\VssBackup_{label}_out.txt'
 $err = 'C:\\Scripts\\VssBackup_{label}_err.txt'
 Remove-Item $out,$err -EA SilentlyContinue
 $t0 = Get-Date
 $p = Start-Process -FilePath 'C:\\Scripts\\VssBackup\\VssBackup.exe' `
-     -ArgumentList '--databases','{",".join(dbs)}','--output','{out_unc}' `
+     -ArgumentList '--databases','{",".join(dbs)}','--output','{out_unc}'{backup_extra_s} `
      -NoNewWindow -Wait -PassThru `
      -RedirectStandardOutput $out -RedirectStandardError $err
 $dt = (Get-Date) - $t0
@@ -89,14 +105,19 @@ for db in dbs:
         r = subprocess.run(["du","-sh",p], capture_output=True, text=True)
         print(r.stdout.strip())
 
-section("4. VssRestore.exe --input " + out_unc)
+restore_extra = []
+if parallel > 1: restore_extra += ["'--parallel'", f"'{parallel}'"]
+restore_extra_s = (", " + ", ".join(restore_extra)) if restore_extra else ""
+
+section("4. VssRestore.exe --input " + out_unc +
+        (f" --parallel {parallel}" if parallel > 1 else ""))
 script = textwrap.dedent(f"""
 $out = 'C:\\Scripts\\VssRestore_{label}_out.txt'
 $err = 'C:\\Scripts\\VssRestore_{label}_err.txt'
 Remove-Item $out,$err -EA SilentlyContinue
 $t0 = Get-Date
 $p = Start-Process -FilePath 'C:\\Scripts\\VssRestore\\VssRestore.exe' `
-     -ArgumentList '--input','{out_unc}' `
+     -ArgumentList '--input','{out_unc}'{restore_extra_s} `
      -NoNewWindow -Wait -PassThru `
      -RedirectStandardOutput $out -RedirectStandardError $err
 $dt = (Get-Date) - $t0

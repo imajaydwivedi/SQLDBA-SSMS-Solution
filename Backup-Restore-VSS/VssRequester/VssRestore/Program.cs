@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using ArxOne.Win32.Vss;
 
 namespace VssRequester.Restore;
@@ -18,11 +20,13 @@ namespace VssRequester.Restore;
 //   3. PreRestore    -> SQL Writer closes file handles
 //   4. Copy MDF/LDF into their target paths (= paths the writer recorded
 //      at backup time, loaded from the source writer metadata XML)
+//      — per DB in parallel, auto-decompressing any .gz files produced
+//      by VssBackup.exe --compress.
 //   5. PostRestore   -> SQL Writer registers each DB in RESTORING state
 //                      (no crash recovery because SetAdditionalRestores=true)
 //
 // Usage:
-//   VssRestore.exe --input \\ryzen9\vss-transport\<ts>
+//   VssRestore.exe --input \\ryzen9\vss-transport\<ts> [--parallel N]
 //
 // Log chain from that point forward is driven by Apply-TLogs.ps1.
 
@@ -115,23 +119,70 @@ internal static class Program
             Log("PreRestore complete");
 
             // Copy files from share back to the paths SQL Writer recorded at backup time.
-            foreach (var (c, meta) in selected)
+            // Per-DB in parallel; decompress .gz transparently (files produced by
+            // VssBackup.exe --compress).
+            var copySw = System.Diagnostics.Stopwatch.StartNew();
+            long totalSrc = 0, totalDst = 0;
+            var degree  = opts.Parallel > 0 ? opts.Parallel : 1;
+            Log($"Copy phase starting: parallel={degree}");
+            var parOpts = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, degree) };
+            Parallel.ForEach(selected, parOpts, tuple =>
             {
+                var (c, meta) = tuple;
                 var dbDir = Path.Combine(opts.Input, c.ComponentName);
+                long dbSrc = 0, dbDst = 0;
+                var dbSw = System.Diagnostics.Stopwatch.StartNew();
                 foreach (var f in AllFiles(meta))
                 {
                     // f.Path = directory, f.FileSpec = filename (usually literal for SQL).
                     Directory.CreateDirectory(f.Path);
-                    foreach (var srcMatch in Directory.EnumerateFiles(dbDir, f.FileSpecification))
+                    // Prefer .gz if present; fall back to the literal filename.
+                    var gzMatches    = Directory.EnumerateFiles(dbDir, f.FileSpecification + ".gz").ToList();
+                    var plainMatches = Directory.EnumerateFiles(dbDir, f.FileSpecification).ToList();
+                    if (gzMatches.Count > 0)
                     {
-                        var dst = Path.Combine(f.Path, Path.GetFileName(srcMatch));
-                        Log($"  copy {srcMatch}  ->  {dst}");
-                        File.Copy(srcMatch, dst, true);
+                        foreach (var srcMatch in gzMatches)
+                        {
+                            var baseName = Path.GetFileName(srcMatch);
+                            if (baseName.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
+                                baseName = baseName[..^3];
+                            var dst = Path.Combine(f.Path, baseName);
+                            var srcLen = new FileInfo(srcMatch).Length;
+                            Log($"  [{c.ComponentName}] decompress {srcMatch}  ->  {dst}");
+                            DecompressFile(srcMatch, dst);
+                            var dstLen = new FileInfo(dst).Length;
+                            System.Threading.Interlocked.Add(ref totalSrc, srcLen);
+                            System.Threading.Interlocked.Add(ref totalDst, dstLen);
+                            dbSrc += srcLen; dbDst += dstLen;
+                        }
+                    }
+                    else
+                    {
+                        foreach (var srcMatch in plainMatches)
+                        {
+                            var dst = Path.Combine(f.Path, Path.GetFileName(srcMatch));
+                            var srcLen = new FileInfo(srcMatch).Length;
+                            Log($"  [{c.ComponentName}] copy {srcMatch}  ->  {dst}");
+                            BufferedCopy(srcMatch, dst);
+                            var dstLen = new FileInfo(dst).Length;
+                            System.Threading.Interlocked.Add(ref totalSrc, srcLen);
+                            System.Threading.Interlocked.Add(ref totalDst, dstLen);
+                            dbSrc += srcLen; dbDst += dstLen;
+                        }
                     }
                 }
+                dbSw.Stop();
+                var mbps = dbSw.Elapsed.TotalSeconds > 0 ? (dbDst / 1048576.0) / dbSw.Elapsed.TotalSeconds : 0;
+                Log($"  [{c.ComponentName}] done in {dbSw.Elapsed.TotalSeconds:F1}s  in={dbSrc / 1048576.0:F0}MB  out={dbDst / 1048576.0:F0}MB  {mbps:F0} MB/s out");
+            });
+            copySw.Stop();
+            var totalMbps = copySw.Elapsed.TotalSeconds > 0 ? (totalDst / 1048576.0) / copySw.Elapsed.TotalSeconds : 0;
+            Log($"Copy phase: {copySw.Elapsed.TotalSeconds:F1}s  in={totalSrc / 1048576.0:F0}MB  out={totalDst / 1048576.0:F0}MB  {totalMbps:F0} MB/s out aggregate");
+
+            // SetFileRestoreStatus is a COM call on bc -> keep serial.
+            foreach (var (c, _) in selected)
                 bc.SetFileRestoreStatus(SqlServerWriterId, c.ComponentType,
                     c.LogicalPath, c.ComponentName, VssFileRestoreStatus.All);
-            }
 
             bc.PostRestore();
             Log("PostRestore complete -> DBs should be in RESTORING state");
@@ -161,13 +212,14 @@ internal static class Program
         throw new InvalidOperationException("SQL Writer metadata XML not found in " + wmDir);
     }
 
-    private record Options(string Input, string? SourceInstance, string? TargetInstance);
+    private record Options(string Input, string? SourceInstance, string? TargetInstance, int Parallel);
 
     private static Options ParseArgs(string[] args)
     {
         string? input = null;
         string? srcInst = null;
         string? tgtInst = null;
+        int? parallel = null;
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -175,13 +227,32 @@ internal static class Program
                 case "--input": input = args[++i]; break;
                 case "--source-instance": srcInst = args[++i]; break;
                 case "--target-instance": tgtInst = args[++i]; break;
+                case "--parallel": parallel = int.Parse(args[++i]); break;
                 default: throw new ArgumentException($"Unknown arg: {args[i]}");
             }
         }
         if (input == null)
             throw new ArgumentException(
-                "Usage: VssRestore --input <share-path> [--source-instance <name>] [--target-instance <name>]");
-        return new Options(input, srcInst, tgtInst);
+                "Usage: VssRestore --input <share-path> [--source-instance <name>] [--target-instance <name>] [--parallel N]");
+        return new Options(input, srcInst, tgtInst, parallel ?? 0);
+    }
+
+    // 1 MB buffers: good throughput over SMB for multi-GB SQL files.
+    private const int CopyBuf = 1 << 20;
+
+    private static void BufferedCopy(string src, string dst)
+    {
+        using var sin  = new FileStream(src, FileMode.Open,   FileAccess.Read,  FileShare.Read, CopyBuf, FileOptions.SequentialScan);
+        using var sout = new FileStream(dst, FileMode.Create, FileAccess.Write, FileShare.None, CopyBuf);
+        sin.CopyTo(sout, CopyBuf);
+    }
+
+    private static void DecompressFile(string srcGz, string dst)
+    {
+        using var fin  = new FileStream(srcGz, FileMode.Open,   FileAccess.Read,  FileShare.Read, CopyBuf, FileOptions.SequentialScan);
+        using var gz   = new GZipStream(fin, CompressionMode.Decompress, leaveOpen: false);
+        using var sout = new FileStream(dst,   FileMode.Create, FileAccess.Write, FileShare.None, CopyBuf);
+        gz.CopyTo(sout, CopyBuf);
     }
 
     // Scan the backup components XML for the first SQL Writer

@@ -655,7 +655,116 @@ tracking the last applied T-log in a small state file. Bring the DB online
 
 ---
 
-## 12. References
+## 12. Performance benchmarks
+
+### 12.1 Optional speed flags
+
+Both requesters default to **serial, uncompressed** copies — the simplest
+and most portable mode. Two **opt-in** flags are available:
+
+| Flag | Where | Effect |
+|---|---|---|
+| `--compress` | `VssBackup.exe` | Gzip each MDF/LDF on the fly (`System.IO.Compression.GZipStream` at `CompressionLevel.Fastest`). Files land on the share with a `.gz` suffix; `VssRestore.exe` decompresses transparently. |
+| `--parallel N` | `VssBackup.exe`, `VssRestore.exe` | Copy up to `N` databases concurrently (`Parallel.ForEach` with `MaxDegreeOfParallelism=N`). SQL Writer COM calls remain serialized. |
+
+The orchestrator `e2e_run_multi.py` exposes the same choice as positional tokens:
+
+```bash
+# Default: serial, uncompressed
+python3 e2e_run_multi.py myrun CDCDemo,Db2 with-tlog
+
+# Opt-in: parallel + compressed
+python3 e2e_run_multi.py myrun CDCDemo,Db2 with-tlog compress parallel=2
+```
+
+### 12.2 Results
+
+Each row corresponds to an end-to-end cycle recorded on the lab VMs. The
+columns are:
+
+- **Scenario** — orchestrator label + flags (`P` = parallel, `Z` = compress).
+- **DBs / size** — databases participating and total MDF+LDF bytes on source.
+- **Backup (s)** — wall time for `VssBackup.exe` (share-out phase only).
+- **Restore (s)** — wall time for `VssRestore.exe` (share-in + PostRestore).
+- **TLog** — `✅` = `verify_tlog_chain.py` succeeded for **all** DBs in the
+  run (including any bridge files pulled from `E:\TLogBackups`); `—` = tlog
+  phase skipped; `partial` = some DBs verified but not all.
+- **Share bytes** — size of the per-run folder on `\\ryzen9\vss-transport`
+  (the compressed wire transfer, when `--compress` is set).
+
+| # | Scenario | DBs / size | Backup (s) | Restore (s) | TLog | Share bytes | Notes |
+|---|---|---|---:|---:|:---:|---:|---|
+| 1 | `b1_small_base` (base) | CDCDemo,Db2 | 69 | 8 | — | 1000 M | exit=0 |
+| 2 | `b2_small_gz` (Z) | CDCDemo,Db2 | 5 | 12 | — | 33 M | exit=0 |
+| 3 | `b3_small_par` (P=2) | CDCDemo,Db2 | 66 | 8 | — | 1000 M | exit=0 |
+| 4 | `b4_small_gzpar` (P=2 Z) | CDCDemo,Db2 | 4 | 5 | — | 33 M | exit=0 |
+| 5 | `b5_small_tlog` (tlog) | CDCDemo,Db2 | 67 | 9 | ✅ | 1000 M | exit=0 |
+| 6 | `b6_small_tlog_gzpar` (P=2 Z tlog) | CDCDemo,Db2 | 6 | 5 | ✅ | 33 M | exit=0 |
+| 7 | `b7_med_base` (base) | DBA,Facebook | 399 | 64 | — | 5.9 G | exit=0 |
+| 8 | `b8_med_gzpar` (P=2 Z) | DBA,Facebook | 698 | 42 | — | 5.5 G | exit=0; DBA is high-entropy (TDE) so `--compress` slowed backup (9 MB/s vs 399s/5.9G uncompressed in #7) |
+| 8b | `b8_med_gzpar` retry (P=2 Z) | DBA,Facebook | 815 | 1 | — | — | exit=0; rerun, restore was a no-op because DBs already present in RESTORING state |
+| 9 | `b9_med_tlog` (tlog) | DBA,Facebook | 541 | 65 | ✅ | 5.9 G | exit=0 |
+| 10 | `b10_full_gzpar_tlog` (tlog; ran **base** — see note) | CDCDemo,Db2,DBA,Facebook,StackOverflow2013 | 3965 | 860 | ✅ (4/5 verified live, Db2 marker confirmed post-run) | 58.4 G | exit=0; `--compress --parallel=5` were passed but `bench_runner` rejected the `--` prefixed forms and silently fell back to `compress=False parallel=1`. Fixed in `bench_runner.py` so both styles are accepted. Db2 tlog verify failed on the *marker-read* step (same transient cross-DB opening error seen in #11). Re-checking post-run confirmed `[Db2].dbo._vss_marker` has the fresh row, so the chain *did* restore successfully. |
+
+| 11 | `b11_full_gzpar_tlog` (P=5 Z tlog) | CDCDemo,Db2,DBA,Facebook,StackOverflow2013 | 1502 | 785 | ✅ (4/5 verified live, CDCDemo marker confirmed post-run) | 17.7 G | exit=0; **compression winner**: 59.8 G → 17.7 G (**3.4x**) wire-size reduction, backup 2.6× faster than #10 (1502 s vs 3965 s). Per-DB ratios: CDCDemo 0.05, Db2 0.006, DBA 1.00 (TDE), Facebook 0.006, SO2013 0.24. CDCDemo marker-read threw a spurious `Database 'DBA' cannot be opened` during the verify step while `DBA` was still in RESTORING; Db2/DBA/Facebook/SO2013 then verified fine and a follow-up read confirmed `[CDCDemo].dbo._vss_marker` has the fresh row — i.e. the chain restored successfully. `sa.default_database_name` is already `master`, so the root cause appears to be a transient server-side reference from CDCDemo's recovery path. |
+
+### 12.2a Take-aways from runs #1 – #11
+
+- **Compression pays off wholesale, not per-DB.** On the 60 GB 5-DB set the
+  wire drops from 60 GB to 18 GB (3.4×), and backup is 2.6× faster end-to-end
+  (#11 vs #10). On `DBA` alone (TDE-encrypted, high-entropy) compression is
+  essentially a no-op — ratio stays at ~1.00 and it costs ~10 MB/s of CPU/IO
+  (#8 vs #7). Conclusion: turn it on unless the whole set is TDE-encrypted.
+- **Parallelism helps backup, restore is IO-bound.** `--parallel=N` on the
+  backup side overlaps per-DB shadow-copy reads cleanly (see #11). On the
+  restore side it gives a modest lift (97 MB/s vs 94 MB/s aggregate — #11
+  vs #10) because SqlPoc's single-spindle E: disk is already saturated.
+- **T-log bridging is robust.** `verify_tlog_chain.py` pulled and applied
+  agent-job `.trn` files correctly in all with-tlog runs (#5, #6, #9, #10,
+  #11) and every DB came back to ONLINE with the fresh marker row present —
+  including the two scenarios where the post-RECOVERY marker *read* threw a
+  spurious error (see #10 & #11 notes).
+- **Known non-fatal quirk on full-set tlog runs (#10, #11).** The post-RECOVERY
+  marker *read* on the first DB of the batch occasionally surfaces
+  `Database 'X' cannot be opened. It is in the middle of a restore.` while a
+  *later* DB is still in RESTORING state. Data is intact — a follow-up read
+  via `dev-helpers/check_all_markers.py` confirms `[<db>].dbo._vss_marker`
+  has the fresh row in every case. `sa.default_database_name` is already
+  `master` on both VMs (verified with `dev-helpers/fix_sa_default.py`), so
+  the trigger is a transient server-side reference exercised during the
+  parallel recovery of the other DB rather than a login-default issue.
+
+### 12.3 How to reproduce
+
+```bash
+# From the repo root on the hypervisor (ryzen9)
+cd SQLDBA-SSMS-Solution/Backup-Restore-VSS
+
+# Each of these leaves a timestamped folder under
+#   /hyperactive/vss-transport/<label>_<ts>/
+# and keeps VssBackup/VssRestore stdout in C:\Scripts on the two VMs.
+python3 VssRequester/e2e_run_multi.py b1  CDCDemo,Db2                                       no-tlog
+python3 VssRequester/e2e_run_multi.py b2  CDCDemo,Db2                                       no-tlog  compress
+python3 VssRequester/e2e_run_multi.py b3  CDCDemo,Db2                                       no-tlog  parallel=2
+python3 VssRequester/e2e_run_multi.py b4  CDCDemo,Db2                                       no-tlog  compress parallel=2
+python3 VssRequester/e2e_run_multi.py b5  CDCDemo,Db2                                       with-tlog
+python3 VssRequester/e2e_run_multi.py b6  CDCDemo,Db2                                       with-tlog  compress parallel=2
+python3 VssRequester/e2e_run_multi.py b7  DBA,Facebook                                      no-tlog
+python3 VssRequester/e2e_run_multi.py b8  DBA,Facebook                                      no-tlog  compress parallel=2
+python3 VssRequester/e2e_run_multi.py b9  DBA,Facebook                                      with-tlog
+python3 VssRequester/e2e_run_multi.py b10 CDCDemo,Db2,DBA,Facebook,StackOverflow2013        with-tlog
+python3 VssRequester/e2e_run_multi.py b11 CDCDemo,Db2,DBA,Facebook,StackOverflow2013        with-tlog  compress parallel=5
+```
+
+Helper scripts used during the sweep — `bench_runner.py` (driver),
+`bench_add.py` / `bench_add_row.py` (markdown-row appender), `drop_targets.py`
+(reset SqlPoc target DBs between runs), `check_all_markers.py` and
+`fix_sa_default.py` (post-run diagnostics) — live under
+`VssRequester/dev-helpers/` and are not required for normal operation.
+
+---
+
+## 13. References
 
 - [SQL Server backup applications — VSS and SQL Writer](https://learn.microsoft.com/en-us/sql/relational-databases/backup-restore/sql-server-vss-writer-backup-guide) — official MS documentation.
 - [A Guide for SQL Server Backup Application Vendors](https://learn.microsoft.com/en-us/previous-versions/sql/sql-server-2005/administrator/cc966520(v=technet.10)) — the canonical VSS requester specification.

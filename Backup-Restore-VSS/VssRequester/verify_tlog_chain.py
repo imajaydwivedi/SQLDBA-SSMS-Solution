@@ -12,7 +12,7 @@ Steps:
      RESTORE LOG the fresh file.
   4. RESTORE WITH RECOVERY and read the marker row back to prove success.
 """
-import sys, datetime, os, ntpath, subprocess
+import sys, datetime, os, ntpath, subprocess, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from winrm_helper import run_ps, sqlcmd, pull_file, SA_PWD
 
@@ -42,6 +42,7 @@ def _rows(host, query, columns, timeout=60):
         [f"[string]$_.{c}" for c in columns])
     ps = (
         f"$r = Invoke-Sqlcmd -ServerInstance '.' -Username 'sa' -Password '{SA_PWD}' "
+        f"-Database 'master' "
         f"-Query @'\nSET NOCOUNT ON;\n{query}\n'@ -QueryTimeout {timeout} -ErrorAction Stop; "
         f"if ($r) {{ $r | ForEach-Object {{ {join_expr} }} | Out-String }}"
     )
@@ -65,14 +66,24 @@ def read_header(trn_path):
         ["FirstLSN", "LastLSN"], timeout=30)
     return (rows[0][0], rows[0][1]) if rows else (None, None)
 
-def current_redo_lsn():
-    """redo_start_lsn lives on the DATA file (type=0) of a RESTORING database."""
-    rows, _ = _rows("SqlPoc",
-        f"SELECT TOP 1 CAST(redo_start_lsn AS VARCHAR(40)) AS redo_lsn "
-        f"FROM sys.master_files "
-        f"WHERE DB_NAME(database_id)='{db}' AND redo_start_lsn IS NOT NULL",
-        ["redo_lsn"])
-    return rows[0][0] if rows else None
+def current_redo_lsn(retries=6, delay=2.0):
+    """redo_start_lsn lives on the DATA file (type=0) of a RESTORING database.
+
+    The SQL Writer PostRestore call can return before sys.master_files is
+    fully populated with redo_start_lsn values (particularly for DBs with
+    many secondary files, e.g. StackOverflow2013). Poll with a short delay
+    so the caller sees a stable value before giving up.
+    """
+    for _ in range(retries):
+        rows, _ = _rows("SqlPoc",
+            f"SELECT TOP 1 CAST(redo_start_lsn AS VARCHAR(40)) AS redo_lsn "
+            f"FROM sys.master_files "
+            f"WHERE DB_NAME(database_id)='{db}' AND redo_start_lsn IS NOT NULL",
+            ["redo_lsn"])
+        if rows:
+            return rows[0][0]
+        time.sleep(delay)
+    return None
 
 def bridge_from_source(label):
     """Pull any .trn files from AgHost-1A whose LastLSN exceeds the DB's
