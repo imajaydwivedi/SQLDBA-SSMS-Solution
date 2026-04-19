@@ -19,7 +19,13 @@ namespace VssRequester.Backup;
 //
 // Usage:
 //   VssBackup.exe --databases CDCDemo,Db2 --output \\ryzen9\vss-transport\<ts>
-//                 [--compress] [--parallel N]
+//                 [--compress] [--parallel N] [--copy-only]
+//
+// --copy-only uses VSS_BT_COPY (VssBackupType.Copy), which tells SQL Writer
+// not to update each database's backup history / differential base. This is
+// the standard knob to use when taking a VSS snapshot alongside an existing
+// backup schedule, so the other backup chain (e.g. nightly full + log ship)
+// is not broken.
 
 internal static class Program
 {
@@ -31,7 +37,8 @@ internal static class Program
         try
         {
             var opts = ParseArgs(args);
-            Log($"=== VssBackup ===  dbs=[{string.Join(",", opts.Databases)}]  output={opts.Output}  compress={opts.Compress}  parallel={opts.Parallel}");
+            var backupType = opts.CopyOnly ? VssBackupType.Copy : VssBackupType.Full;
+            Log($"=== VssBackup ===  dbs=[{string.Join(",", opts.Databases)}]  output={opts.Output}  compress={opts.Compress}  parallel={opts.Parallel}  type={backupType}");
             Directory.CreateDirectory(opts.Output);
 
             var factory = VssFactoryProvider.Default.GetVssFactory();
@@ -40,7 +47,7 @@ internal static class Program
             bc.SetBackupState(
                 selectComponents: true,
                 backupBootableSystemState: false,
-                backupType: VssBackupType.Full,
+                backupType: backupType,
                 partialFileSupport: false);
             bc.SetContext(VssSnapshotContext.Backup);
             bc.GatherWriterMetadata();
@@ -158,12 +165,13 @@ internal static class Program
         }
     }
 
-    private record Options(IReadOnlyList<string> Databases, string Output, bool Compress, int Parallel);
+    private record Options(IReadOnlyList<string> Databases, string Output, bool Compress, int Parallel, bool CopyOnly);
 
     private static Options ParseArgs(string[] args)
     {
         string? dbs = null, output = null;
         bool compress = false;
+        bool copyOnly = false;
         int? parallel = null;
         for (int i = 0; i < args.Length; i++)
         {
@@ -172,16 +180,17 @@ internal static class Program
                 case "--databases": dbs      = args[++i]; break;
                 case "--output":    output   = args[++i]; break;
                 case "--compress":  compress = true; break;
+                case "--copy-only": copyOnly = true; break;
                 case "--parallel":  parallel = int.Parse(args[++i]); break;
                 default: throw new ArgumentException($"Unknown arg: {args[i]}");
             }
         }
         if (dbs == null || output == null)
             throw new ArgumentException(
-                "Usage: VssBackup --databases X,Y --output <share-path> [--compress] [--parallel N]");
+                "Usage: VssBackup --databases X,Y --output <share-path> [--compress] [--copy-only] [--parallel N]");
         var dbList = dbs.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var par = parallel ?? 1;
-        return new Options(dbList, output, compress, par);
+        return new Options(dbList, output, compress, par, copyOnly);
     }
 
     // 1 MB buffers: good throughput over SMB for multi-GB SQL files.

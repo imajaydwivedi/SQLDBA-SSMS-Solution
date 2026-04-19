@@ -101,6 +101,108 @@ def sqlcmd(host_key, query, timeout=60, sa=True, database="master"):
     )
     return run_ps(host_key, script)
 
+_PYODBC_POOL = {}  # host_key -> pyodbc.Connection (kept open across requests)
+
+def _pyodbc_driver():
+    import pyodbc
+    for d in pyodbc.drivers():
+        if "ODBC Driver" in d and "SQL Server" in d:
+            return d
+    raise RuntimeError("No ODBC Driver for SQL Server found. Install "
+                       "msodbcsql18 (e.g. `apt install msodbcsql18`).")
+
+def _pyodbc_connect(host_key, database="master", timeout=5):
+    """Open a direct TCP connection to SQL Server on host_key using sa creds.
+    No PowerShell/WinRM hop — typical round-trip is ~20 ms vs ~15 s cold for
+    Invoke-Sqlcmd. Connection is cached per host_key for subsequent calls.
+    """
+    import pyodbc
+    conn = _PYODBC_POOL.get(host_key)
+    if conn is not None:
+        try:
+            conn.cursor().execute("SELECT 1").fetchone()
+            return conn
+        except Exception:
+            try: conn.close()
+            except Exception: pass
+            _PYODBC_POOL.pop(host_key, None)
+    h = HOSTS[host_key]
+    cs = (f"DRIVER={{{_pyodbc_driver()}}};SERVER={h['ip']},1433;"
+          f"DATABASE={database};UID=sa;PWD={SA_PWD};"
+          f"Encrypt=no;TrustServerCertificate=yes;"
+          f"Connection Timeout={timeout};")
+    conn = pyodbc.connect(cs, timeout=timeout, autocommit=True)
+    _PYODBC_POOL[host_key] = conn
+    return conn
+
+def sql_query_pyodbc(host_key, query, params=None, database="master", timeout=15):
+    """Execute a SELECT via pyodbc and return (rows, err, rc).
+
+    Rows are lists of native Python values (str/int/datetime/None). Intended
+    for UI-facing endpoints that must stay sub-second. Errors are returned in
+    ``err`` with ``rc=1`` so callers match the existing (rows, err, rc)
+    contract of :func:`sql_query_fast`.
+    """
+    try:
+        conn = _pyodbc_connect(host_key, database=database, timeout=timeout)
+        conn.timeout = timeout
+        cur  = conn.cursor()
+        cur.execute(query, params) if params else cur.execute(query)
+        rows = [list(r) for r in cur.fetchall()] if cur.description else []
+        return rows, "", 0
+    except Exception as e:
+        _PYODBC_POOL.pop(host_key, None)
+        return [], str(e), 1
+
+def sql_exec_pyodbc(host_key, query, params=None, database="master", timeout=30):
+    """Run an action query (no result set) via pyodbc. Returns (err, rc)."""
+    try:
+        conn = _pyodbc_connect(host_key, database=database, timeout=timeout)
+        conn.timeout = timeout
+        cur  = conn.cursor()
+        cur.execute(query, params) if params else cur.execute(query)
+        return "", 0
+    except Exception as e:
+        _PYODBC_POOL.pop(host_key, None)
+        return str(e), 1
+
+
+def sql_query_fast(host_key, query, database="master", timeout=30):
+    """Run a T-SQL query via System.Data.SqlClient — bypasses the SqlServer
+    PowerShell module load that Invoke-Sqlcmd incurs (~15 s on cold boot).
+    Returns (rows, err, rc) where rows is ``list[list[str]]`` with one entry
+    per result row. Each value is already tab-stripped; NULLs render as "".
+    Intended for UI-facing endpoints that need sub-second latency.
+    """
+    pwd = SA_PWD.replace("'", "''")
+    db  = database.replace("'", "''")
+    BT  = chr(96)
+    script = f'''
+$cs = 'Server=.;Database={db};User Id=sa;Password={pwd};Encrypt=False;TrustServerCertificate=True;Connect Timeout={timeout};'
+$conn = New-Object System.Data.SqlClient.SqlConnection $cs
+$conn.Open()
+$cmd = $conn.CreateCommand()
+$cmd.CommandTimeout = {timeout}
+$cmd.CommandText = @'
+{query}
+'@
+$r = $cmd.ExecuteReader()
+while ($r.Read()) {{
+  $vals = for ($i=0; $i -lt $r.FieldCount; $i++) {{
+    if ($r.IsDBNull($i)) {{ '' }} else {{ $r.GetValue($i).ToString() }}
+  }}
+  $vals -join "{BT}t"
+}}
+$conn.Close()
+'''
+    out, err, rc = run_ps(host_key, script, timeout=max(60, timeout + 20))
+    rows = []
+    if rc == 0:
+        for line in out.splitlines():
+            if line.strip():
+                rows.append(line.split("\t"))
+    return rows, err, rc
+
 def push_file(host_key, local_path, remote_path):
     """Push a file to the remote Windows VM using SMB admin share.
     remote_path: Windows-style path like 'C:\\Scripts\\foo.ps1'

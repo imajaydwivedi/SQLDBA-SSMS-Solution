@@ -666,6 +666,10 @@ and most portable mode. Two **opt-in** flags are available:
 |---|---|---|
 | `--compress` | `VssBackup.exe` | Gzip each MDF/LDF on the fly (`System.IO.Compression.GZipStream` at `CompressionLevel.Fastest`). Files land on the share with a `.gz` suffix; `VssRestore.exe` decompresses transparently. |
 | `--parallel N` | `VssBackup.exe`, `VssRestore.exe` | Copy up to `N` databases concurrently (`Parallel.ForEach` with `MaxDegreeOfParallelism=N`). SQL Writer COM calls remain serialized. |
+| `--copy-only` | `VssBackup.exe` | Sets `VssBackupType.Copy` (VSS_BT_COPY). Does **not** update SQL's differential base LSN or backup history — safe to interleave with a live log-ship / full-backup schedule. |
+| `--rename "A=B,…"` | `VssRestore.exe` | Accepted for API symmetry; the caller (`restore.py`) issues `ALTER DATABASE … MODIFY NAME` once the DB is ONLINE. |
+| `--move-data / --move-log "Db=Dir,…"` | `VssRestore.exe` | `AddNewTarget` per file spec + Copy phase writes to the new dir. Missing directories are created. |
+| `--attach-only "Db1,Db2"` | `VssRestore.exe` | Skip the writer flow (`SetSelectedForRestore` / `PreRestore` / `PostRestore`) for the listed DBs; only stage the snapshot files at the `--move-data` / `--move-log` paths. `restore.py` uses this automatically for DBs that have both a rename and a move dir, then runs `CREATE DATABASE … FOR ATTACH`. |
 
 The orchestrator `e2e_run_multi.py` exposes the same choice as positional tokens:
 
@@ -804,6 +808,19 @@ cd SQLDBA-SSMS-Solution/Backup-Restore-VSS
 `start-vss-gui.sh` auto-installs `fastapi` and `uvicorn` into the active
 Python environment on first run, then prints the URL and starts Uvicorn.
 
+The web API also requires **`pyodbc`** and a SQL Server ODBC driver on the
+hypervisor. These are used by `/api/databases` and `/api/databases/exists`
+for direct TCP connections to SQL Server over port 1433 — bypassing
+PowerShell / `Invoke-Sqlcmd` keeps metadata queries at ~20 ms instead of
+~15 s (SqlServer-module cold-load). On Debian/Ubuntu:
+
+```bash
+# ODBC runtime + driver
+sudo apt-get install -y unixodbc msodbcsql18      # Microsoft apt repo
+# Python binding
+pip install pyodbc
+```
+
 Open in any browser:
 ```
 http://192.168.122.1:8765
@@ -816,9 +833,12 @@ http://192.168.122.1:8765
 | `GET`  | `/api/servers` | List all SQL servers (built-in + added) |
 | `POST` | `/api/servers` | Add a new server `{key, ip, user, pwd, role}` |
 | `DELETE` | `/api/servers/{key}` | Remove an added server |
-| `GET`  | `/api/databases?host=<key>` | Query `sys.databases` on a server via WinRM |
-| `GET`  | `/api/databases/exists?host=<key>&names=a,b,c` | Return which of the given names already exist on `<key>` (used by the Restore tab's conflict check) |
-| `GET`  | `/api/snapshots` | List snapshot folders on the transport share |
+| `GET`  | `/api/databases?host=<key>` | Query `sys.databases` on a server. Uses a direct pyodbc TCP connection to `<host>:1433` (sa credentials from `.venv/config.env`) — **no PowerShell/WinRM hop**. Typical round-trip ~20 ms vs ~15 s cold for `Invoke-Sqlcmd`, so the Backup tab's DB list stays responsive on server re-selection. |
+| `GET`  | `/api/databases/exists?host=<key>&names=a,b,c` | Return which of the given names already exist on `<key>` (used by the Restore tab's conflict check). Same pyodbc path as `/api/databases`. |
+| `GET`  | `/api/snapshots` | List snapshot folders on the transport share. Each row is `{name, databases[], path, mtime, created_at, size_bytes, size_human}` — `mtime` is the Unix epoch of the snapshot folder, `created_at` is the same value formatted `YYYY-MM-DD HH:MM:SS`, and `size_bytes` / `size_human` are the summed on-disk size of every file under the folder. Rows are sorted by `mtime` descending (newest first). The `writer_metadata` subfolder is excluded from `databases[]`. |
+| `GET`  | `/api/snapshots/{name}` | Return per-file detail for one snapshot: `{name, path, mtime, created_at, size_bytes, size_human, file_count, files[]}` where each `files[i]` is `{rel, size, human, mtime}`. Validates `{name}` against path traversal (`400` for dotfiles / path separators, `404` when absent). |
+| `DELETE` | `/api/snapshots/{name}` | Remove the named snapshot folder (and all files under it) from the transport share. Returns `{"deleted": "<name>"}`. Same safety validation as the detail endpoint. |
+| `DELETE` | `/api/snapshots` | Remove **every** snapshot folder under the transport share. Returns `{"deleted": [...], "failed": [{"name","error"}, ...]}`. Use with care — this is irreversible. |
 | `POST` | `/api/jobs/backup` | Start a backup job (see payload below) |
 | `POST` | `/api/jobs/restore` | Start a restore job (see payload below) |
 | `GET`  | `/api/jobs` | List all jobs with status |
@@ -833,7 +853,8 @@ http://192.168.122.1:8765
   "databases": ["CDCDemo", "Db2"],
   "compress":  true,
   "parallel":  2,
-  "with_tlog": false
+  "with_tlog": false,
+  "copy_only": true
 }
 ```
 
@@ -844,6 +865,8 @@ http://192.168.122.1:8765
   "target":     "SqlPoc",
   "databases":  ["CDCDemo", "Db2"],
   "rename":     { "Db2": "Db2_Copy" },
+  "move_data":  { "Db2": "E:\\Data\\Db2_Copy" },
+  "move_log":   { "Db2": "F:\\Log\\Db2_Copy"  },
   "overwrite":  false,
   "source":     "AgHost-1A",
   "parallel":   1,
@@ -857,8 +880,11 @@ Field reference:
 | Field | Purpose |
 |-------|---------|
 | `target` | Host key of the SQL server where the restore lands. May be the **same** as the backup source (overwrite in place) or a **different** server. |
-| `rename` | Optional `{original: new_name}` map. After `VssRestore.exe` finishes, each listed DB is renamed via `ALTER DATABASE … MODIFY NAME`. Entries where the original name was not selected in `databases`, or where `new_name == original`, are ignored. |
-| `overwrite` | If any DB name on `target` would collide with an original **or** renamed name, `restore.py` aborts with exit code `2` unless this flag is `true` — then the conflicting DBs are dropped first. |
+| `copy_only` *(backup)* | When `true`, `VssBackup.exe` sets `VssBackupType.Copy` (VSS_BT_COPY) so the snapshot does **not** update the SQL backup history / differential base; safe to run alongside an existing log-ship or full-backup schedule. |
+| `rename` | Optional `{original: new_name}` map. After the restore lands and the DB is ONLINE, `restore.py` issues `ALTER DATABASE … MODIFY NAME` on the target. (The requester intentionally does **not** call `SetRestoreName` during the writer flow: in practice PreRestore then pre-attaches the target DB under the original name and locks the MDF path, breaking the requester's own Copy phase.) Entries where the original is not in `databases`, or where `new_name == original`, are ignored. |
+| `move_data` / `move_log` | Optional `{original: directory}` maps. For standard restores (live original dropped), `VssRestore.exe` calls `AddNewTarget` on the writer and the Copy phase writes the files to the new location — SQL Writer then registers the DB at the new paths on PostRestore. Target directories are created if missing. |
+| side-by-side mode | When a DB has **both** a `rename` entry **and** `move_data`/`move_log`, it enters side-by-side mode: `VssRestore.exe` is invoked with `--attach-only <db>` for that DB, which skips `SetSelectedForRestore` / `PreRestore` / `PostRestore` entirely and only stages the snapshot files at the move paths. `restore.py` then issues `CREATE DATABASE [new_name] … FOR ATTACH` against those files, leaving the live original DB untouched at its existing paths. This is the only safe way to have the new copy coexist with the live original on the same instance — calling `SetRestoreName` + `AddNewTarget` against a still-live DB causes SQL Writer to silently relocate the live DB in place and ignore the rename. |
+| `overwrite` | If any DB name on `target` would collide with an original **or** renamed name, `restore.py` aborts with exit code `2` unless this flag is `true` — then the conflicting DBs are dropped first. Side-by-side DBs skip the original-name collision check because the live DB stays up; only the new (renamed) name must be free. |
 | `source` | Host key of the server that owns the agent-job `.trn` files, passed to `verify_tlog_chain.py` via `--source`. Only used when `with_tlog` is true. Defaults to `AgHost-1A`. |
 | `pitr`   | Optional PITR timestamp — omit or `null` to recover to the latest LSN. When set, `verify_tlog_chain.py` issues `RESTORE DATABASE … WITH RECOVERY, STOPAT = '<pitr>'`. |
 
@@ -871,8 +897,9 @@ Field reference:
 | Feature | Details |
 |---------|---------|
 | **SQL Server sidebar** | Lists all servers from `.venv/config.env`; supports adding/removing extra servers at runtime |
-| **Backup tab** | Source server picker → live DB list (state + recovery model); compress toggle; parallel slider 1–10; optional T-log verify |
-| **Restore tab** | Snapshot dropdown (sorted newest-first with DB list); target server picker (same-or-different); per-DB **rename** textbox; **Overwrite existing** toggle; live conflict banner that queries `/api/databases/exists` against the target; T-log chain toggle with T-log source dropdown; parallel slider; PITR datetime picker |
+| **Backup tab** | Source server picker → live DB list (state + recovery model); compress toggle; **Copy-only** toggle (VSS_BT_COPY); parallel slider 1–10; optional T-log verify. The DB list auto-loads on page open for the pre-selected source (no extra click required) and on every dropdown change, powered by the pyodbc-direct `/api/databases` endpoint. |
+| **Restore tab** | Snapshot dropdown — each option shows `YYYY-MM-DD HH:MM:SS — <snapshot_name> [db1, db2]` and the list is sorted by the snapshot folder's mtime (newest first); target server picker (same-or-different); per-DB **rename** textbox plus **Move data dir** and **Move log dir** inputs (combine rename + move for a side-by-side restore on the same server); **Overwrite existing** toggle; live conflict banner that queries `/api/databases/exists` against the target; T-log chain toggle with T-log source dropdown; parallel slider; PITR datetime picker |
+| **Snapshots tab** | Table view of every snapshot folder under the transport share: name, created timestamp, DB list, total size. Per-row **Details** button opens a modal with the full file tree and per-file sizes (via `/api/snapshots/{name}`); per-row **Delete** removes one snapshot; header-level **Delete all** wipes every snapshot folder. Header summary shows snapshot count + aggregate size. |
 | **Jobs tab** | Full job history table with type/status badges and per-job log button |
 | **Progress modal** | Terminal-style dark log panel; WebSocket streams output in real time; shows exit code on completion |
 | **Running badge** | Header badge pulses while any job is in-flight (auto-refreshes every 4 s) |

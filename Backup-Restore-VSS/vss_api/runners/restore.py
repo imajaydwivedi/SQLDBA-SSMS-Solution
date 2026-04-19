@@ -4,15 +4,29 @@ Usage (called by vss_api/server.py):
     python3 restore.py <snapshot_name> <target_host>
                        [--databases DB1,DB2]
                        [--rename orig1=new1,orig2=new2]
+                       [--move-data orig1=E:\\NewData\\,...]
+                       [--move-log  orig1=F:\\NewLog\\,...]
                        [--overwrite]
                        [--source SOURCE_HOST]      (for tlog bridging)
                        [--parallel N]
                        [--with-tlog]
                        [--stopat YYYY-MM-DDTHH:MM:SS]
 
+--move-data / --move-log are forwarded to VssRestore.exe and applied via
+AddNewTarget so SQL Writer registers the DB at the new paths on PostRestore.
+--rename is applied here after the DB is ONLINE via ALTER DATABASE MODIFY
+NAME (the requester deliberately does not call SetRestoreName — it caused
+PreRestore to lock the MDF path and break the Copy phase).
+
+Side-by-side mode: when a DB has BOTH a rename entry AND a move-data or
+move-log entry, the writer flow is bypassed entirely for that DB. VssRestore
+is called with --attach-only <db>, which only stages the snapshot files at
+the move paths; this script then runs CREATE DATABASE [new_name] ... FOR
+ATTACH so the new DB appears next to the still-live original.
+
 Outputs progress lines to stdout; the job manager captures and streams them.
 Exit codes:  0=ok  1=usage/snapshot error  2=name conflict (no --overwrite)
-             3=VssRestore failed  4=tlog verify failed  5=rename failed
+             3=VssRestore failed  4=tlog verify failed  5=rename/attach failed
 """
 import argparse, os, sys, subprocess, textwrap, time
 
@@ -33,6 +47,12 @@ ap.add_argument("target")
 ap.add_argument("--databases", default=None)
 ap.add_argument("--rename",    default=None,
                 help="Comma list of orig=new pairs. Unlisted DBs keep original name.")
+ap.add_argument("--move-data", default=None, dest="move_data",
+                help="Comma list of orig=dir pairs; relocate each DB's data "
+                     "files (.mdf/.ndf) to the given directory on target.")
+ap.add_argument("--move-log",  default=None, dest="move_log",
+                help="Comma list of orig=dir pairs; relocate each DB's log "
+                     "file (.ldf) to the given directory on target.")
 ap.add_argument("--overwrite", action="store_true",
                 help="Drop any existing DB on target that conflicts with the "
                      "original or renamed names before restoring.")
@@ -76,17 +96,44 @@ if args.rename:
 # effective_name[orig] → final DB name after rename (same as orig if no rename)
 effective = {db: rename_map.get(db, db) for db in dbs}
 
+def _parse_dir_map(arg: str | None) -> dict[str, str]:
+    """Parse "Db2=E:\\Data\\,CDCDemo=F:\\Data\\" into {Db2:E:\\Data, CDCDemo:F:\\Data}.
+    Trailing slashes are stripped so VssRestore.exe sees a uniform form.
+    Entries for DBs not in the selected list are dropped."""
+    m: dict[str, str] = {}
+    if not arg: return m
+    for pair in arg.split(","):
+        pair = pair.strip()
+        if not pair or "=" not in pair: continue
+        k, v = [s.strip() for s in pair.split("=", 1)]
+        if not k or not v or k not in dbs: continue
+        m[k] = v.rstrip("\\/")
+    return m
+
+move_data = _parse_dir_map(args.move_data)
+move_log  = _parse_dir_map(args.move_log)
+
 print(f"[restore] snapshot={snap}  target={args.target}  source={args.source}")
 print(f"[restore] databases={dbs}  parallel={args.parallel}")
 print(f"[restore] with_tlog={args.with_tlog}  stopat={args.stopat}")
 print(f"[restore] rename_map={rename_map}  overwrite={args.overwrite}")
+print(f"[restore] move_data={move_data}  move_log={move_log}")
 print(f"[restore] input UNC: {out_unc}")
 
 # ── Pre-flight: detect name conflicts on target ───────────────────────────────
-# We need every ORIGINAL name (VssRestore registers by original name) AND every
-# RENAMED target name to be absent before we begin; if any already exist, require
-# --overwrite to drop them.
-names_to_clear = sorted({*dbs, *effective.values()})
+# For a plain restore, both the ORIGINAL name (VssRestore registers under the
+# original name before the rename fallback) and any RENAMED target must be free.
+# For a SIDE-BY-SIDE restore — a DB that has BOTH --rename and a file-move — the
+# SQL Writer emits the new name at the new physical paths via SetRestoreName +
+# AddNewTarget, so the live original DB can stay up; only the NEW name must be
+# free. Any DB that has a rename but no move is still a logical-rename-only
+# restore and needs its original name cleared.
+sidebyside = {db for db in dbs
+              if db in rename_map and (db in move_data or db in move_log)}
+names_to_clear = sorted({*(d for d in dbs if d not in sidebyside),
+                         *effective.values()})
+if sidebyside:
+    print(f"[restore] side-by-side DBs (originals preserved): {sorted(sidebyside)}")
 qlist = ",".join(f"'{d}'" for d in names_to_clear)
 out, err, rc = sqlcmd(args.target,
     f"SELECT name FROM sys.databases WHERE name IN ({qlist}) ORDER BY name")
@@ -118,8 +165,28 @@ for name in names_to_clear:
     """))
 
 # ── VssRestore.exe ────────────────────────────────────────────────────────────
+# Build the arg list for VssRestore.exe. Each token is single-quoted for the
+# PowerShell -ArgumentList array. Rename / move maps are serialized back into
+# their "orig=new" comma form so the requester can parse them identically.
+# Side-by-side DBs are passed via --attach-only so the writer flow skips them
+# entirely (the live original is preserved); their files are staged at the
+# --move-data/--move-log paths and attached by this script afterward, so
+# --rename does not need to include them (the attach uses the new name).
+rename_for_exe = {o: n for o, n in rename_map.items() if o not in sidebyside}
 extra = []
-if args.parallel > 1: extra += ["'--parallel'", f"'{args.parallel}'"]
+if args.parallel > 1:
+    extra += ["'--parallel'", f"'{args.parallel}'"]
+if rename_for_exe:
+    pairs = ",".join(f"{k}={v}" for k, v in rename_for_exe.items())
+    extra += ["'--rename'", f"'{pairs}'"]
+if move_data:
+    pairs = ",".join(f"{k}={v}" for k, v in move_data.items())
+    extra += ["'--move-data'", f"'{pairs}'"]
+if move_log:
+    pairs = ",".join(f"{k}={v}" for k, v in move_log.items())
+    extra += ["'--move-log'", f"'{pairs}'"]
+if sidebyside:
+    extra += ["'--attach-only'", f"'{','.join(sorted(sidebyside))}'"]
 extra_s = (", " + ", ".join(extra)) if extra else ""
 
 print(f"[restore] Starting VssRestore.exe ...")
@@ -156,33 +223,108 @@ if rc != 0 or (_vss_ec is not None and _vss_ec != 0):
     print(f"[restore] ERROR: VssRestore.exe failed (winrm_rc={rc} exe_ec={_vss_ec})")
     sys.exit(3)
 
-# ── Post-restore state (DBs registered under ORIGINAL names, RESTORING) ───────
-qlist = ",".join(f"'{d}'" for d in dbs)
+# ── Post-restore state (check both original and effective names) ──────────────
+# SetRestoreName may or may not have been honored by SQL Writer. Inspect what
+# actually landed so the subsequent recovery / rename steps key off the real
+# on-target names.
+probe_names = sorted({*dbs, *effective.values()})
+qlist = ",".join(f"'{d}'" for d in probe_names)
 out, _, _ = sqlcmd(args.target,
     f"SELECT name, state_desc FROM sys.databases WHERE name IN ({qlist}) ORDER BY name")
 print("[restore] Post-restore DB states:"); print(out)
 
+# Map each selected DB to the actual name it landed under on the target. Prefer
+# the effective (renamed) name if it shows up; fall back to the original.
+state_lines = [l.strip() for l in out.splitlines() if l.strip()]
+state_tokens = {l.split()[0] for l in state_lines if l.split() and l.split()[0] in probe_names}
+landed: dict[str, str] = {}
+for db in dbs:
+    eff = effective[db]
+    if eff != db and eff in state_tokens:
+        landed[db] = eff          # SetRestoreName honored (true side-by-side)
+    elif db in state_tokens:
+        landed[db] = db           # Arrived under original name
+    else:
+        landed[db] = db           # Assume original; later steps will surface errors
+print(f"[restore] landed names: {landed}")
+
+# ── Side-by-side attach fallback ──────────────────────────────────────────────
+# When the original DB is still ONLINE on the target, SQL Writer silently
+# skips PostRestore for the renamed component: the requester's Copy phase
+# writes the .mdf/.ldf files to the AddNewTarget paths, but no catalog entry
+# is created for the new name. Attach those files explicitly so the new DB
+# appears side-by-side with the untouched original.
+if sidebyside:
+    for db in sorted(sidebyside):
+        new_name = effective[db]
+        if new_name in state_tokens:
+            print(f"[restore] {new_name} already registered by SQL Writer; "
+                  f"skipping attach fallback.")
+            continue
+        snap_db_dir = os.path.join(lin_path, db)
+        if not os.path.isdir(snap_db_dir):
+            print(f"[restore] ERROR: snapshot folder for {db} not found at {snap_db_dir}")
+            sys.exit(5)
+        data_dir = move_data.get(db)
+        log_dir  = move_log.get(db)
+        filenames: list[str] = []
+        for f in sorted(os.listdir(snap_db_dir)):
+            lf = f.lower()
+            if lf.endswith((".mdf", ".ndf")):
+                tgt_dir = data_dir
+            elif lf.endswith(".ldf"):
+                tgt_dir = log_dir
+            else:
+                continue
+            if not tgt_dir:
+                print(f"[restore] ERROR: no move dir configured for {db}/{f}; "
+                      f"cannot attach side-by-side.")
+                sys.exit(5)
+            filenames.append(tgt_dir.rstrip("\\/") + "\\" + f)
+        if not filenames:
+            print(f"[restore] ERROR: no data/log files found for {db} in {snap_db_dir}")
+            sys.exit(5)
+        files_sql = ",\n    ".join(f"(FILENAME = N'{p}')" for p in filenames)
+        qry = f"CREATE DATABASE [{new_name}] ON\n    {files_sql}\nFOR ATTACH;"
+        print(f"[restore] Attaching side-by-side: [{new_name}]")
+        for p in filenames:
+            print(f"           FILENAME = {p}")
+        o, e, rc4 = sqlcmd(args.target, qry, timeout=600)
+        if rc4 != 0:
+            print(f"[restore] ERROR: attach failed for {new_name}: {e[:600]}")
+            sys.exit(5)
+        landed[db] = new_name
+        print(f"[restore] {new_name} attached ONLINE.")
+
 # ── Optional tlog chain verify (with optional PITR stopat) ────────────────────
-# verify_tlog_chain.py brings each DB ONLINE (WITH RECOVERY) at the end.
+# verify_tlog_chain.py brings each DB ONLINE (WITH RECOVERY) at the end; it
+# operates on whatever name the DB actually arrived under. Skip side-by-side
+# DBs — they are already ONLINE via attach and have no RESTORING tail.
 if args.with_tlog:
     for db in dbs:
-        print(f"[restore] T-log chain verify for {db}"
+        if db in sidebyside:
+            print(f"[restore] skipping t-log verify for side-by-side DB {effective[db]} "
+                  f"(attached ONLINE; log chain not applicable).")
+            continue
+        name = landed[db]
+        print(f"[restore] T-log chain verify for {name}"
               + (f"  PITR={args.stopat}" if args.stopat else "") + " ...")
-        cmd = ["python3", "-u", os.path.join(REQDIR, "verify_tlog_chain.py"), db,
+        cmd = ["python3", "-u", os.path.join(REQDIR, "verify_tlog_chain.py"), name,
                "--target", args.target, "--source", args.source]
         if args.stopat:
             cmd += ["--stopat", args.stopat]
         r = subprocess.run(cmd, capture_output=False, text=True)
         if r.returncode != 0:
-            print(f"[restore] ERROR: verify_tlog_chain FAILED for {db}")
+            print(f"[restore] ERROR: verify_tlog_chain FAILED for {name}")
             sys.exit(4)
 
 # ── Bring any still-RESTORING rename candidates ONLINE so we can rename ───────
-# If the user skipped with_tlog but asked for a rename, the DB is still in
-# RESTORING state; ALTER DATABASE MODIFY NAME requires the DB to be ONLINE, so
-# apply RESTORE WITH RECOVERY for the DBs that need renaming.
+# If the user skipped with_tlog but asked for a rename AND SetRestoreName was
+# not honored (i.e. DB landed under original), recover under the original name.
 if rename_map and not args.with_tlog:
     for orig in rename_map:
+        if landed[orig] == effective[orig]:
+            continue              # already renamed by SetRestoreName / attached
         print(f"[restore] RESTORE DATABASE [{orig}] WITH RECOVERY (pre-rename) ...")
         o, e, rc2 = sqlcmd(args.target,
             f"RESTORE DATABASE [{orig}] WITH RECOVERY;", timeout=120)
@@ -190,16 +332,21 @@ if rename_map and not args.with_tlog:
             print(f"[restore] ERROR: could not recover {orig} for rename: {e[:400]}")
             sys.exit(5)
 
-# ── Rename step (ALTER DATABASE ... MODIFY NAME) ──────────────────────────────
+# ── Rename fallback (ALTER DATABASE ... MODIFY NAME) ─────────────────────────
+# Only needed when SetRestoreName was not honored (landed==orig != effective).
 if rename_map:
-    print(f"[restore] Renaming databases on {args.target}: {rename_map}")
-    for orig, new in rename_map.items():
-        print(f"[restore] ALTER DATABASE [{orig}] MODIFY NAME = [{new}]")
-        o, e, rc3 = sqlcmd(args.target,
-            f"ALTER DATABASE [{orig}] MODIFY NAME = [{new}];", timeout=60)
-        if rc3 != 0:
-            print(f"[restore] ERROR: rename {orig} -> {new} failed: {e[:400]}")
-            sys.exit(5)
+    pending = {o: n for o, n in rename_map.items() if landed[o] != n}
+    if pending:
+        print(f"[restore] Renaming (fallback) on {args.target}: {pending}")
+        for orig, new in pending.items():
+            print(f"[restore] ALTER DATABASE [{orig}] MODIFY NAME = [{new}]")
+            o, e, rc3 = sqlcmd(args.target,
+                f"ALTER DATABASE [{orig}] MODIFY NAME = [{new}];", timeout=60)
+            if rc3 != 0:
+                print(f"[restore] ERROR: rename {orig} -> {new} failed: {e[:400]}")
+                sys.exit(5)
+    else:
+        print(f"[restore] SetRestoreName already applied on-target; no ALTER needed.")
     # Show the final state using the effective names.
     qlist2 = ",".join(f"'{d}'" for d in effective.values())
     out, _, _ = sqlcmd(args.target,

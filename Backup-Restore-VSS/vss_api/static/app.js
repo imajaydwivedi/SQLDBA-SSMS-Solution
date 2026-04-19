@@ -23,6 +23,11 @@ async function loadServers() {
   _servers = await r.json();
   renderSidebar();
   populateDropdowns();
+  // Auto-populate the Backup tab's DB list for the pre-selected source.
+  // /api/databases is now pyodbc-direct (~20 ms) so this does not delay
+  // page render noticeably.
+  const bkp = document.getElementById("bkpSource");
+  if (bkp && bkp.value) loadDatabases("bkpSource", "bkpDbList");
 }
 
 function renderSidebar() {
@@ -123,13 +128,15 @@ function selectAllDbs(id) { document.querySelectorAll(`#${id} .db-check`).forEac
 function clearAllDbs(id)  { document.querySelectorAll(`#${id} .db-check`).forEach(c => c.checked=false); }
 
 // ── Snapshots ─────────────────────────────────────────────────────────────────
+// The /api/snapshots endpoint returns rows already sorted by directory mtime
+// (newest first). Each row carries created_at (formatted) + mtime (epoch).
 async function loadSnapshots() {
   const r = await fetch("/api/snapshots");
   const snaps = await r.json();
   const sel = document.getElementById("rstSnapshot");
   if (!snaps.length) { sel.innerHTML = '<option value="">No snapshots found</option>'; return; }
   sel.innerHTML = snaps.map(s =>
-    `<option value="${s.name}">${s.name}  [${s.databases.join(", ")}]</option>`
+    `<option value="${s.name}">${s.created_at} \u2014 ${s.name}  [${s.databases.join(", ")}]</option>`
   ).join("");
   loadSnapshotDbs();
 }
@@ -145,19 +152,43 @@ async function loadSnapshotDbs() {
     el.innerHTML = '<small class="text-muted">No databases in this snapshot</small>'; return;
   }
   el.innerHTML = snap.databases.map(db => `
-    <div class="d-flex align-items-center gap-2 py-0" data-orig="${db}">
-      <div class="form-check mb-0" style="min-width:180px">
-        <input class="form-check-input db-check" type="checkbox" value="${db}"
-               id="rst_db_${db}" checked onchange="refreshRestoreConflicts()">
-        <label class="form-check-label" for="rst_db_${db}" style="font-size:13px">${db}</label>
+    <div class="border rounded px-2 py-1 mb-1" data-orig="${db}">
+      <div class="d-flex align-items-center gap-2">
+        <div class="form-check mb-0" style="min-width:180px">
+          <input class="form-check-input db-check" type="checkbox" value="${db}"
+                 id="rst_db_${db}" checked onchange="refreshRestoreConflicts()">
+          <label class="form-check-label" for="rst_db_${db}" style="font-size:13px">${db}</label>
+        </div>
+        <i class="bi bi-arrow-right text-muted"></i>
+        <input type="text" class="form-control form-control-sm db-rename" value="${db}"
+               data-orig="${db}" oninput="refreshRestoreConflicts()"
+               placeholder="new name (edit to rename)"
+               style="font-size:12px;max-width:220px">
       </div>
-      <i class="bi bi-arrow-right text-muted"></i>
-      <input type="text" class="form-control form-control-sm db-rename" value="${db}"
-             data-orig="${db}" oninput="refreshRestoreConflicts()"
-             placeholder="new name (edit to rename)"
-             style="font-size:12px;max-width:220px">
+      <div class="d-flex align-items-center gap-1 mt-1 ms-4" style="font-size:11px">
+        <i class="bi bi-hdd text-info" title="Relocate data files (.mdf/.ndf)"></i>
+        <input type="text" class="form-control form-control-sm db-movedata"
+               data-orig="${db}" placeholder="Move data dir (e.g. E:\\Data\\${db}_Copy\\) — optional"
+               style="font-size:11px">
+        <i class="bi bi-journal-text text-warning ms-2" title="Relocate log file (.ldf)"></i>
+        <input type="text" class="form-control form-control-sm db-movelog"
+               data-orig="${db}" placeholder="Move log dir (e.g. F:\\Log\\${db}_Copy\\) — optional"
+               style="font-size:11px">
+      </div>
     </div>`).join("");
   refreshRestoreConflicts();
+}
+
+// Map of {orig: dir} for --move-data / --move-log; empty inputs are skipped.
+function collectDirMap(cssClass) {
+  const m = {};
+  document.querySelectorAll(`#rstDbList .db-check:checked`).forEach(chk => {
+    const orig = chk.value;
+    const inp  = document.querySelector(`#rstDbList .${cssClass}[data-orig="${orig}"]`);
+    const v    = inp && inp.value.trim();
+    if (v) m[orig] = v;
+  });
+  return m;
 }
 
 // Map of {orig_db_name: effective_name} — unchanged names are kept as orig
@@ -231,6 +262,7 @@ async function startBackup() {
     compress:  document.getElementById("bkpCompress").checked,
     parallel:  +document.getElementById("bkpParallel").value,
     with_tlog: document.getElementById("bkpTlog").checked,
+    copy_only: document.getElementById("bkpCopyOnly").checked,
   };
   const r = await fetch("/api/jobs/backup", { method: "POST",
     headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
@@ -272,11 +304,15 @@ async function startRestore() {
     }
   } catch (e) { /* best-effort; server does the authoritative check */ }
 
+  const moveData  = collectDirMap("db-movedata");
+  const moveLog   = collectDirMap("db-movelog");
   const body = {
     snapshot:  snap,
     target,
     databases: dbs,
     rename:    Object.keys(renameMap).length ? renameMap : null,
+    move_data: Object.keys(moveData).length  ? moveData  : null,
+    move_log:  Object.keys(moveLog ).length  ? moveLog   : null,
     overwrite,
     source:    withTlog ? (source || null) : null,
     parallel:  +document.getElementById("rstParallel").value,
@@ -380,4 +416,113 @@ function openProgress(jobId, title) {
   document.getElementById("progressModal").addEventListener("hidden.bs.modal", () => {
     if (_ws) { _ws.close(); _ws = null; }
   }, { once: true });
+}
+
+
+// ── Snapshots management page ────────────────────────────────────────────────
+// Renders the "Snapshots" tab: table of all snapshot folders with size and DB
+// list, plus per-row details/delete and a "Delete all" button. All endpoints
+// read from /api/snapshots (see server.py).
+let _snapshotDetailModal = null;
+
+async function loadSnapshotsPage() {
+  const tbody = document.getElementById("snapshotsTable");
+  const sum   = document.getElementById("snapSummary");
+  tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">Loading…</td></tr>';
+  try {
+    const r = await fetch("/api/snapshots");
+    const snaps = await r.json();
+    if (!snaps.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">No snapshots found.</td></tr>';
+      if (sum) sum.textContent = "";
+      return;
+    }
+    const total = snaps.reduce((a, s) => a + (s.size_bytes || 0), 0);
+    if (sum) sum.textContent = `(${snaps.length} snapshot${snaps.length===1?"":"s"}, ${humanSize(total)} total)`;
+    tbody.innerHTML = snaps.map(s => `
+      <tr>
+        <td><i class="bi bi-hdd text-info"></i></td>
+        <td class="font-monospace" style="font-size:12px">${s.name}</td>
+        <td style="white-space:nowrap">${s.created_at}</td>
+        <td>${(s.databases||[]).map(d => `<span class="badge bg-light text-dark border me-1">${d}</span>`).join("")}</td>
+        <td class="text-end" style="white-space:nowrap">${s.size_human || ""}</td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-link p-0 me-2" title="Details"
+                  onclick="showSnapshotDetail('${s.name.replace(/'/g, "\\'")}')">
+            <i class="bi bi-info-circle"></i>
+          </button>
+          <button class="btn btn-sm btn-link p-0 text-danger" title="Delete"
+                  onclick="deleteSnapshot('${s.name.replace(/'/g, "\\'")}')">
+            <i class="bi bi-trash3"></i>
+          </button>
+        </td>
+      </tr>`).join("");
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-danger">${e.message}</td></tr>`;
+  }
+}
+
+function humanSize(n) {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let u = 0;
+  while (n >= 1024 && u < units.length - 1) { n /= 1024; u++; }
+  return (u === 0 ? n + " B" : n.toFixed(1) + " " + units[u]);
+}
+
+async function showSnapshotDetail(name) {
+  if (!_snapshotDetailModal) {
+    _snapshotDetailModal = new bootstrap.Modal(document.getElementById("snapshotDetailModal"));
+  }
+  document.getElementById("snapDetailTitle").textContent = name;
+  document.getElementById("snapDetailMeta").textContent  = "Loading…";
+  document.getElementById("snapDetailFiles").innerHTML   = "";
+  _snapshotDetailModal.show();
+  try {
+    const r = await fetch(`/api/snapshots/${encodeURIComponent(name)}`);
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    document.getElementById("snapDetailMeta").innerHTML =
+      `<strong>Created:</strong> ${d.created_at} &nbsp;·&nbsp; ` +
+      `<strong>Files:</strong> ${d.file_count} &nbsp;·&nbsp; ` +
+      `<strong>Total size:</strong> ${d.size_human} &nbsp;·&nbsp; ` +
+      `<strong>Path:</strong> <span class="font-monospace">${d.path}</span>`;
+    document.getElementById("snapDetailFiles").innerHTML =
+      d.files.map(f => `<tr>
+        <td class="font-monospace" style="font-size:11px">${f.rel}</td>
+        <td class="text-end" style="white-space:nowrap">${f.human}</td>
+      </tr>`).join("");
+  } catch (e) {
+    document.getElementById("snapDetailMeta").innerHTML =
+      `<span class="text-danger">${e.message}</span>`;
+  }
+}
+
+async function deleteSnapshot(name) {
+  if (!confirm(`Delete snapshot '${name}'?\n\nThis permanently removes the folder and its files from the transport share.`)) return;
+  try {
+    const r = await fetch(`/api/snapshots/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (!r.ok) throw new Error(await r.text());
+    loadSnapshotsPage();
+    // Refresh Restore tab dropdown too, in case that snapshot was listed there.
+    loadSnapshots();
+  } catch (e) {
+    alert(`Delete failed: ${e.message}`);
+  }
+}
+
+async function deleteAllSnapshots() {
+  if (!confirm("Delete ALL snapshots?\n\nEvery snapshot folder on the transport share will be removed. This cannot be undone.")) return;
+  try {
+    const r = await fetch("/api/snapshots", { method: "DELETE" });
+    if (!r.ok) throw new Error(await r.text());
+    const j = await r.json();
+    if (j.failed && j.failed.length) {
+      alert(`${j.deleted.length} deleted, ${j.failed.length} failed:\n` +
+            j.failed.map(f => `  • ${f.name}: ${f.error}`).join("\n"));
+    }
+    loadSnapshotsPage();
+    loadSnapshots();
+  } catch (e) {
+    alert(`Delete-all failed: ${e.message}`);
+  }
 }

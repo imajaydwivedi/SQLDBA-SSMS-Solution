@@ -2,7 +2,11 @@
 
 Usage (called by vss_api/server.py):
     python3 backup.py <label> <source_host> <db1,db2,...>
-                      [--compress] [--parallel N] [--with-tlog]
+                      [--compress] [--parallel N] [--with-tlog] [--copy-only]
+
+--copy-only forwards VSS_BT_COPY to VssBackup.exe so the snapshot does not
+update each database's backup history / differential base (safe to run
+alongside an existing full+log backup schedule).
 
 Outputs progress lines to stdout; the job manager captures and streams them.
 """
@@ -26,6 +30,8 @@ ap.add_argument("databases")
 ap.add_argument("--compress",   action="store_true")
 ap.add_argument("--parallel",   type=int, default=1)
 ap.add_argument("--with-tlog",  action="store_true")
+ap.add_argument("--copy-only",  action="store_true", dest="copy_only",
+                help="Use VSS_BT_COPY (does not update SQL backup history).")
 args = ap.parse_args()
 
 ts      = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -38,7 +44,7 @@ os.makedirs(out_lin, exist_ok=True)
 subprocess.run(["chmod", "777", out_lin], check=False)
 
 print(f"[backup] label={label}  source={args.source}  dbs={dbs}")
-print(f"[backup] compress={args.compress}  parallel={args.parallel}")
+print(f"[backup] compress={args.compress}  parallel={args.parallel}  copy_only={args.copy_only}")
 print(f"[backup] output UNC : {out_unc}")
 print(f"[backup] output path: {out_lin}")
 
@@ -52,6 +58,7 @@ print("[backup] Source DB states:"); print(out)
 # ── VssBackup.exe ─────────────────────────────────────────────────────────────
 extra = []
 if args.compress:    extra += ["'--compress'"]
+if args.copy_only:   extra += ["'--copy-only'"]
 if args.parallel > 1: extra += ["'--parallel'", f"'{args.parallel}'"]
 extra_s = (", " + ", ".join(extra)) if extra else ""
 

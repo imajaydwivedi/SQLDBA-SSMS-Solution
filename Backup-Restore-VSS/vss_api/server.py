@@ -20,7 +20,7 @@ sys.path.insert(0, VSS_ROOT)
 from vss_api.config import (list_servers, add_server, remove_server,
                              TRANSPORT_PATH, REQDIR)
 from vss_api.jobs import store
-from winrm_helper import sqlcmd
+from winrm_helper import sqlcmd, sql_query_fast, sql_query_pyodbc
 
 app = FastAPI(title="VSS Backup & Restore", version="1.0")
 
@@ -59,23 +59,19 @@ def api_del_server(key: str):
 
 @app.get("/api/databases")
 def api_databases(host: str):
-    out, err, rc = sqlcmd(
+    # Direct pyodbc connection to <host>:1433 (no PowerShell/WinRM hop) —
+    # typical round-trip is ~20 ms vs ~15 s cold for Invoke-Sqlcmd, so the
+    # Backup tab's DB list stays responsive on server re-selection.
+    rows, err, rc = sql_query_pyodbc(
         host,
         "SELECT name, state_desc, recovery_model_desc "
         "FROM sys.databases WHERE database_id > 4 ORDER BY name",
     )
     if rc != 0:
         raise HTTPException(500, err[:400])
-    rows = []
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[0] not in ("-", "name", "----"):
-            rows.append({
-                "name":     parts[0],
-                "state":    parts[1] if len(parts) > 1 else "?",
-                "recovery": parts[2] if len(parts) > 2 else "?",
-            })
-    return rows
+    return [{"name":     r[0],
+             "state":    r[1] if len(r) > 1 else "?",
+             "recovery": r[2] if len(r) > 2 else "?"} for r in rows if r]
 
 
 @app.get("/api/databases/exists")
@@ -88,34 +84,133 @@ def api_databases_exists(host: str, names: str):
     wanted = [n.strip() for n in names.split(",") if n.strip()]
     if not wanted:
         return {"existing": [], "checked": []}
-    qlist = ",".join("'" + n.replace("'", "''") + "'" for n in wanted)
-    out, err, rc = sqlcmd(host,
-        f"SELECT name FROM sys.databases WHERE name IN ({qlist}) ORDER BY name")
+    placeholders = ",".join("?" * len(wanted))
+    rows, err, rc = sql_query_pyodbc(host,
+        f"SELECT name FROM sys.databases WHERE name IN ({placeholders}) ORDER BY name",
+        params=wanted)
     if rc != 0:
         raise HTTPException(500, err[:400])
     wset = set(wanted)
-    existing = []
-    for line in out.splitlines():
-        tok = line.strip()
-        if tok in wset:
-            existing.append(tok)
-    return {"existing": sorted(set(existing)), "checked": wanted}
+    existing = sorted({r[0] for r in rows if r and r[0] in wset})
+    return {"existing": existing, "checked": wanted}
 
 
 # ── Snapshots ─────────────────────────────────────────────────────────────────
 
+def _dir_size(path):
+    """Sum of all file sizes under ``path``. Returns 0 on any error."""
+    total = 0
+    try:
+        for root, _dirs, files in os.walk(path):
+            for fn in files:
+                try: total += os.path.getsize(os.path.join(root, fn))
+                except OSError: pass
+    except OSError:
+        pass
+    return total
+
+def _human_size(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.1f} {unit}" if unit != "B" else f"{n} B"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+def _safe_snapshot_dir(name):
+    """Resolve ``name`` to an absolute path inside TRANSPORT_PATH or abort."""
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        raise HTTPException(400, "Invalid snapshot name")
+    root = os.path.abspath(TRANSPORT_PATH)
+    path = os.path.abspath(os.path.join(root, name))
+    if os.path.commonpath([root, path]) != root or not os.path.isdir(path):
+        raise HTTPException(404, "Snapshot not found")
+    return path
+
+
 @app.get("/api/snapshots")
 def api_snapshots():
-    out = []
-    for d in sorted(glob.glob(os.path.join(TRANSPORT_PATH, "*")), reverse=True):
+    # Sort by directory mtime (newest first) — names can be sorted alphabet-
+    # ically when the label is consistent but not when users pick different
+    # labels across days. mtime is the actual backup completion timestamp.
+    import datetime as _dt
+    rows = []
+    for d in glob.glob(os.path.join(TRANSPORT_PATH, "*")):
         if not os.path.isdir(d):
             continue
-        name = os.path.basename(d)
-        dbs  = [os.path.basename(x)
-                for x in glob.glob(os.path.join(d, "*"))
-                if os.path.isdir(x)]
-        out.append({"name": name, "databases": sorted(dbs), "path": d})
-    return out
+        try: mtime = os.path.getmtime(d)
+        except OSError: continue
+        dbs = [os.path.basename(x)
+               for x in glob.glob(os.path.join(d, "*"))
+               if os.path.isdir(x) and os.path.basename(x) != "writer_metadata"]
+        size = _dir_size(d)
+        rows.append({
+            "name":       os.path.basename(d),
+            "databases":  sorted(dbs),
+            "path":       d,
+            "mtime":      mtime,
+            "created_at": _dt.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S"),
+            "size_bytes": size,
+            "size_human": _human_size(size),
+        })
+    rows.sort(key=lambda r: r["mtime"], reverse=True)
+    return rows
+
+
+@app.get("/api/snapshots/{name}")
+def api_snapshot_detail(name: str):
+    """Return per-file details for a single snapshot folder."""
+    import datetime as _dt
+    path = _safe_snapshot_dir(name)
+    items = []
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for fn in files:
+            fp = os.path.join(root, fn)
+            try: st = os.stat(fp)
+            except OSError: continue
+            total += st.st_size
+            items.append({
+                "rel":   os.path.relpath(fp, path),
+                "size":  st.st_size,
+                "human": _human_size(st.st_size),
+                "mtime": st.st_mtime,
+            })
+    items.sort(key=lambda x: x["rel"])
+    mtime = os.path.getmtime(path)
+    return {
+        "name":        name,
+        "path":        path,
+        "mtime":       mtime,
+        "created_at":  _dt.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S"),
+        "size_bytes":  total,
+        "size_human":  _human_size(total),
+        "file_count":  len(items),
+        "files":       items,
+    }
+
+
+@app.delete("/api/snapshots/{name}")
+def api_snapshot_delete(name: str):
+    import shutil
+    path = _safe_snapshot_dir(name)
+    shutil.rmtree(path)
+    return {"deleted": name}
+
+
+@app.delete("/api/snapshots")
+def api_snapshots_delete_all():
+    """Delete every snapshot folder under TRANSPORT_PATH. Use with care."""
+    import shutil
+    root = os.path.abspath(TRANSPORT_PATH)
+    deleted, failed = [], []
+    for d in glob.glob(os.path.join(root, "*")):
+        if not os.path.isdir(d):
+            continue
+        try:
+            shutil.rmtree(d); deleted.append(os.path.basename(d))
+        except OSError as e:
+            failed.append({"name": os.path.basename(d), "error": str(e)})
+    return {"deleted": deleted, "failed": failed}
 
 
 # ── Jobs ──────────────────────────────────────────────────────────────────────
@@ -127,6 +222,7 @@ class BackupReq(BaseModel):
     compress:  bool = False
     parallel:  int  = 1
     with_tlog: bool = False
+    copy_only: bool = False                      # VSS_BT_COPY: preserve chain
 
 
 class RestoreReq(BaseModel):
@@ -134,6 +230,8 @@ class RestoreReq(BaseModel):
     target:    str
     databases: Optional[List[str]] = None
     rename:    Optional[Dict[str, str]] = None   # {original: new_name}
+    move_data: Optional[Dict[str, str]] = None   # {original: "E:\\Data\\..."}
+    move_log:  Optional[Dict[str, str]] = None   # {original: "F:\\Log\\..."}
     overwrite: bool = False
     source:    Optional[str] = None              # tlog-bridge source host
     parallel:  int  = 1
@@ -149,6 +247,7 @@ def api_backup(r: BackupReq):
     if r.compress:    cmd.append("--compress")
     if r.parallel > 1: cmd += ["--parallel", str(r.parallel)]
     if r.with_tlog:   cmd.append("--with-tlog")
+    if r.copy_only:   cmd.append("--copy-only")
     store.run_subprocess(job, cmd, cwd=VSS_ROOT)
     return {"job_id": job.id}
 
@@ -162,6 +261,12 @@ def api_restore(r: RestoreReq):
     if r.rename:
         pairs = [f"{k}={v}" for k, v in r.rename.items() if k and v and k != v]
         if pairs:    cmd += ["--rename", ",".join(pairs)]
+    if r.move_data:
+        pairs = [f"{k}={v}" for k, v in r.move_data.items() if k and v]
+        if pairs:    cmd += ["--move-data", ",".join(pairs)]
+    if r.move_log:
+        pairs = [f"{k}={v}" for k, v in r.move_log.items() if k and v]
+        if pairs:    cmd += ["--move-log", ",".join(pairs)]
     if r.overwrite:   cmd.append("--overwrite")
     if r.source:      cmd += ["--source", r.source]
     if r.parallel > 1: cmd += ["--parallel", str(r.parallel)]
