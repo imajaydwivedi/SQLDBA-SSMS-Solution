@@ -764,7 +764,126 @@ Helper scripts used during the sweep — `bench_runner.py` (driver),
 
 ---
 
-## 13. References
+## 13. Web GUI Console
+
+A three-layer web interface is included so operators can drive every
+backup/restore operation from a browser instead of the command line.
+
+### 13.1 Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Layer 3 — Bootstrap 5 SPA  (vss_api/static/)               │
+│  Dark sidebar · Backup tab · Restore tab · Jobs tab          │
+│  WebSocket live log streaming · PITR datetime picker         │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ REST + WebSocket
+┌──────────────────────────▼──────────────────────────────────┐
+│  Layer 2 — FastAPI REST API  (vss_api/)                      │
+│  server.py  config.py  jobs.py                               │
+│  runners/backup.py  runners/restore.py                       │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ WinRM / smbclient / subprocess
+┌──────────────────────────▼──────────────────────────────────┐
+│  Layer 1 — Existing commands (unchanged interface)           │
+│  VssBackup.exe · VssRestore.exe · verify_tlog_chain.py       │
+│  e2e_run_multi.py · winrm_helper.py                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 13.2 Launch
+
+Run **once** on the hypervisor (ryzen9) from the repo root:
+
+```bash
+cd SQLDBA-SSMS-Solution/Backup-Restore-VSS
+./start-vss-gui.sh              # default port 8765
+./start-vss-gui.sh --port 9000  # custom port
+```
+
+`start-vss-gui.sh` auto-installs `fastapi` and `uvicorn` into the active
+Python environment on first run, then prints the URL and starts Uvicorn.
+
+Open in any browser:
+```
+http://192.168.122.1:8765
+```
+
+### 13.3 REST API reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET`  | `/api/servers` | List all SQL servers (built-in + added) |
+| `POST` | `/api/servers` | Add a new server `{key, ip, user, pwd, role}` |
+| `DELETE` | `/api/servers/{key}` | Remove an added server |
+| `GET`  | `/api/databases?host=<key>` | Query `sys.databases` on a server via WinRM |
+| `GET`  | `/api/snapshots` | List snapshot folders on the transport share |
+| `POST` | `/api/jobs/backup` | Start a backup job (see payload below) |
+| `POST` | `/api/jobs/restore` | Start a restore job (see payload below) |
+| `GET`  | `/api/jobs` | List all jobs with status |
+| `GET`  | `/api/jobs/{id}` | Job detail + full log lines |
+| `WS`   | `/ws/{id}` | WebSocket stream — real-time progress lines |
+
+**Backup payload**
+```json
+{
+  "label":     "my_backup",
+  "source":    "AgHost-1A",
+  "databases": ["CDCDemo", "Db2"],
+  "compress":  true,
+  "parallel":  2,
+  "with_tlog": false
+}
+```
+
+**Restore payload**
+```json
+{
+  "snapshot":   "my_backup_20260419_120000",
+  "target":     "SqlPoc",
+  "databases":  ["CDCDemo"],
+  "parallel":   1,
+  "with_tlog":  true,
+  "pitr":       "2026-04-19 14:30:00"
+}
+```
+`pitr` is optional — omit or set to `null` to recover to the latest LSN.
+When set, `verify_tlog_chain.py` issues
+`RESTORE DATABASE … WITH RECOVERY, STOPAT = '<pitr>'`.
+
+### 13.4 GUI features
+
+| Feature | Details |
+|---------|---------|
+| **SQL Server sidebar** | Lists all servers from `.venv/config.env`; supports adding/removing extra servers at runtime |
+| **Backup tab** | Source server picker → live DB list (state + recovery model); compress toggle; parallel slider 1–10; optional T-log verify |
+| **Restore tab** | Snapshot dropdown (sorted newest-first with DB list); target server picker; DB checkboxes; parallel slider; T-log chain toggle; PITR datetime picker |
+| **Jobs tab** | Full job history table with type/status badges and per-job log button |
+| **Progress modal** | Terminal-style dark log panel; WebSocket streams output in real time; shows exit code on completion |
+| **Running badge** | Header badge pulses while any job is in-flight (auto-refreshes every 4 s) |
+
+### 13.5 File layout
+
+```
+Backup-Restore-VSS/
+  start-vss-gui.sh          ← one-command launcher
+  vss_api/
+    __init__.py
+    server.py               ← FastAPI app (all routes + WebSocket)
+    config.py               ← server registry (built-ins + servers.json)
+    jobs.py                 ← background job manager + WS broadcaster
+    servers.json            ← runtime-added servers (auto-created, gitignored)
+    runners/
+      backup.py             ← backup-only subprocess runner
+      restore.py            ← restore-from-snapshot runner (+ PITR)
+    static/
+      index.html            ← Bootstrap 5 SPA shell
+      app.js                ← all frontend logic
+```
+
+---
+
+## 14. References
 
 - [SQL Server backup applications — VSS and SQL Writer](https://learn.microsoft.com/en-us/sql/relational-databases/backup-restore/sql-server-vss-writer-backup-guide) — official MS documentation.
 - [A Guide for SQL Server Backup Application Vendors](https://learn.microsoft.com/en-us/previous-versions/sql/sql-server-2005/administrator/cc966520(v=technet.10)) — the canonical VSS requester specification.
