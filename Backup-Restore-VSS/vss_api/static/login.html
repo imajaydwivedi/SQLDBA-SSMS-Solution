@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VSS Console — Sign in</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{min-height:100vh;display:flex;align-items:center;justify-content:center;
+         background:radial-gradient(ellipse at 50% 0%,#2c2d3b 0%,#161719 70%);
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+    .card{width:100%;max-width:400px;padding:32px 32px 28px;background:#1c1d21;
+          border-radius:8px;box-shadow:0 4px 32px rgba(0,0,0,.6)}
+    /* Logo */
+    .logo{text-align:center;margin-bottom:20px}
+    .logo-circle{width:72px;height:72px;border-radius:50%;margin:0 auto 14px;
+                 background:radial-gradient(circle at 35% 35%,#f5a623,#e05a00 60%,#9b2e00);
+                 display:flex;align-items:center;justify-content:center;
+                 box-shadow:0 0 28px rgba(240,100,0,.35)}
+    .logo-circle svg{width:40px;height:40px;fill:#fff}
+    .title{color:#fff;font-size:22px;font-weight:400;text-align:center;margin-bottom:24px}
+    /* Form */
+    label{display:block;font-size:12px;color:#c7d0d9;margin-bottom:5px;margin-top:14px}
+    .field{position:relative}
+    input[type=text],input[type=password],input[type=email]{
+      width:100%;padding:9px 40px 9px 12px;background:#0b0c0e;color:#d8dce4;
+      border:1px solid #464c54;border-radius:4px;font-size:14px;outline:none;
+      transition:border-color .15s}
+    input:focus{border-color:#3b9ede;box-shadow:0 0 0 2px rgba(59,158,222,.2)}
+    .eye{position:absolute;right:10px;top:50%;transform:translateY(-50%);
+         background:none;border:none;cursor:pointer;color:#9fa7b3;padding:2px}
+    .eye:hover{color:#d8dce4}
+    /* Buttons */
+    .btn-login{width:100%;padding:10px;margin-top:20px;background:#1f60c4;color:#fff;
+               border:none;border-radius:4px;font-size:15px;font-weight:500;cursor:pointer;
+               transition:background .15s}
+    .btn-login:hover{background:#1a52a8}
+    .btn-login:disabled{opacity:.6;cursor:not-allowed}
+    .forgot{display:block;text-align:right;margin-top:8px;font-size:12px;
+            color:#3b9ede;text-decoration:none}
+    .forgot:hover{text-decoration:underline}
+    /* OR divider */
+    .divider{display:flex;align-items:center;gap:12px;margin:20px 0 16px;color:#464c54;font-size:12px}
+    .divider::before,.divider::after{content:"";flex:1;height:1px;background:#464c54}
+    /* OAuth buttons */
+    .btn-oauth{width:100%;padding:10px 12px;margin-bottom:10px;border:none;border-radius:4px;
+               font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;
+               justify-content:center;gap:10px;transition:opacity .15s}
+    .btn-oauth:hover{opacity:.88}
+    .btn-google{background:#d44638;color:#fff}
+    .btn-github{background:#24292e;color:#fff}
+    /* Error/info */
+    .alert{border-radius:4px;padding:10px 14px;font-size:13px;margin-bottom:12px;display:none}
+    .alert-error{background:#2a1a1a;color:#ff6b6b;border:1px solid #c0392b}
+    .alert-info {background:#162336;color:#6db3f2;border:1px solid #1f60c4}
+    /* Forgot modal */
+    .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);
+              z-index:100;align-items:center;justify-content:center}
+    .modal-bg.open{display:flex}
+    .modal{background:#1c1d21;border:1px solid #464c54;border-radius:8px;
+           padding:28px;width:360px;max-width:95vw}
+    .modal h3{color:#fff;font-size:16px;margin-bottom:16px}
+    .modal-close{float:right;background:none;border:none;color:#9fa7b3;font-size:20px;cursor:pointer;line-height:1}
+    .modal-close:hover{color:#fff}
+    .btn-send{width:100%;padding:9px;margin-top:14px;background:#1f60c4;color:#fff;
+              border:none;border-radius:4px;font-size:14px;cursor:pointer}
+    .btn-send:hover{background:#1a52a8}
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <!-- Logo -->
+  <div class="logo">
+    <div class="logo-circle">
+      <!-- database lock icon -->
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="12" cy="5" rx="9" ry="3"/>
+        <path d="M3 5v4c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
+        <path d="M3 9v4c0 1.32 3.13 2.47 7.5 2.87"/>
+        <path d="M13 17.5a4.5 4.5 0 1 0 9 0 4.5 4.5 0 0 0-9 0"/>
+        <path d="M15 17.5h5M17.5 15v5" stroke="#1c1d21" stroke-width="1.5" fill="none"/>
+        <rect x="15.5" y="16.5" width="4" height="2.5" rx="0.5" fill="#1c1d21"/>
+        <path d="M16.5 16.5v-1a1 1 0 0 1 2 0v1" stroke="#1c1d21" stroke-width="1.2" fill="none"/>
+      </svg>
+    </div>
+    <div class="title">Welcome to VSS Console</div>
+  </div>
+
+  <div class="alert alert-error" id="errBox"></div>
+  <div class="alert alert-info"  id="infoBox"></div>
+
+  <!-- Local login form -->
+  <form id="loginForm" onsubmit="doLogin(event)">
+    <label for="username">Email or username</label>
+    <div class="field">
+      <input type="text" id="username" name="username" placeholder="email or username" autocomplete="username" required>
+    </div>
+
+    <label for="password">Password</label>
+    <div class="field">
+      <input type="password" id="password" name="password" placeholder="password" autocomplete="current-password" required>
+      <button type="button" class="eye" onclick="togglePwd()" title="Show/hide password" id="eyeBtn">
+        <svg id="eyeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+    </div>
+
+    <button type="submit" class="btn-login" id="loginBtn">Log in</button>
+    <a href="#" class="forgot" onclick="openForgot();return false">Forgot your password?</a>
+  </form>
+
+  <!-- OAuth buttons (shown dynamically) -->
+  <div id="oauthSection" style="display:none">
+    <div class="divider">or</div>
+    <button class="btn-oauth btn-google" id="btnGoogle" style="display:none" onclick="location.href='/auth/oauth/google'">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M44.5 20H24v8h11.8C34.6 33.1 29.8 36 24 36a12 12 0 1 1 0-24c3.1 0 5.9 1.2 8 3.1l5.7-5.7A20 20 0 0 0 4 24a20 20 0 0 0 20 20c11 0 19.7-8 19.7-20 0-1.3-.2-2.7-.2-4z"/></svg>
+      Sign in with Google
+    </button>
+    <button class="btn-oauth btn-github" id="btnGithub" style="display:none" onclick="location.href='/auth/oauth/github'">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      Sign in with GitHub
+    </button>
+  </div>
+</div>
+
+<!-- Forgot password modal -->
+<div class="modal-bg" id="forgotModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeForgot()">×</button>
+    <h3>Reset password</h3>
+    <label>Email address</label>
+    <div class="field" style="margin-top:6px">
+      <input type="email" id="resetEmail" placeholder="your@email.com">
+    </div>
+    <button class="btn-send" onclick="sendReset()">Send reset link</button>
+    <div class="alert alert-info" id="resetInfo" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<script>
+// ── Check URL for errors ──────────────────────────────────────────────────────
+(function() {
+  const p = new URLSearchParams(location.search);
+  const err = p.get("error");
+  const MSGS = {
+    access_denied:  "Access was denied by the OAuth provider.",
+    invalid_state:  "OAuth state mismatch — please try again.",
+    google_failed:  "Google sign-in failed. Please try again.",
+    github_failed:  "GitHub sign-in failed. Please try again.",
+  };
+  if (err) showError(MSGS[err] || `Authentication error: ${err}`);
+})();
+
+// ── Load OAuth provider availability ─────────────────────────────────────────
+fetch("/auth/providers").then(r => r.json()).then(p => {
+  const hasOAuth = p.google || p.github;
+  if (hasOAuth) document.getElementById("oauthSection").style.display = "";
+  if (p.google)  document.getElementById("btnGoogle").style.display  = "";
+  if (p.github)  document.getElementById("btnGithub").style.display  = "";
+}).catch(() => {});
+
+// ── Local login ───────────────────────────────────────────────────────────────
+async function doLogin(e) {
+  e.preventDefault();
+  clearAlerts();
+  const btn = document.getElementById("loginBtn");
+  btn.disabled = true; btn.textContent = "Signing in…";
+  const fd = new FormData(document.getElementById("loginForm"));
+  try {
+    const r = await fetch("/auth/login", { method: "POST", body: fd });
+    if (r.ok) {
+      location.href = "/";
+    } else {
+      const j = await r.json().catch(() => ({}));
+      showError(j.detail || "Invalid credentials.");
+      btn.disabled = false; btn.textContent = "Log in";
+    }
+  } catch {
+    showError("Network error. Please try again.");
+    btn.disabled = false; btn.textContent = "Log in";
+  }
+}
+
+// ── Password eye toggle ───────────────────────────────────────────────────────
+function togglePwd() {
+  const f = document.getElementById("password");
+  const open = f.type === "password";
+  f.type = open ? "text" : "password";
+  document.getElementById("eyeIcon").innerHTML = open
+    ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" stroke-width="2"/>'
+    : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+}
+
+// ── Forgot password ───────────────────────────────────────────────────────────
+function openForgot()  { document.getElementById("forgotModal").classList.add("open"); }
+function closeForgot() { document.getElementById("forgotModal").classList.remove("open"); }
+
+async function sendReset() {
+  const email = document.getElementById("resetEmail").value.trim();
+  if (!email) return;
+  const ri = document.getElementById("resetInfo");
+  ri.style.display = "block";
+  ri.textContent = "Sending…";
+  try {
+    const r = await fetch("/auth/forgot-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    ri.textContent = r.ok
+      ? "If that email is registered, a reset link has been sent."
+      : "Could not send email — SMTP may not be configured.";
+  } catch { ri.textContent = "Network error."; }
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById("errBox");
+  el.textContent = msg; el.style.display = "block";
+}
+function clearAlerts() {
+  document.getElementById("errBox").style.display  = "none";
+  document.getElementById("infoBox").style.display = "none";
+}
+</script>
+</body>
+</html>

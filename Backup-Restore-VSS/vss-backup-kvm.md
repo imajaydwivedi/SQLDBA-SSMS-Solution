@@ -250,12 +250,12 @@ python3 -c "import winrm_helper as h; \
   print('SHARE_UNC ->', h.SHARE_UNC)"
 ```
 
-Expected:
+Expected (values will match whatever you set in `.venv/config.env`):
 
 ```text
-AgHost-1A -> 192.168.122.247
-SqlPoc    -> 192.168.122.192
-SHARE_UNC -> \\192.168.122.1\vss-transport
+AgHost-1A -> 192.168.x.y
+SqlPoc    -> 192.168.x.z
+SHARE_UNC -> \\192.168.x.1\vss-transport
 ```
 
 If `.venv/config.env` is missing or a key is blank, every script aborts with
@@ -866,11 +866,14 @@ http://192.168.122.1:8765
 | `GET`  | `/api/snapshots/{name}` | Return per-file detail for one snapshot: `{name, path, mtime, created_at, size_bytes, size_human, file_count, files[]}` where each `files[i]` is `{rel, size, human, mtime}`. Validates `{name}` against path traversal (`400` for dotfiles / path separators, `404` when absent). |
 | `DELETE` | `/api/snapshots/{name}` | Remove the named snapshot folder (and all files under it) from the transport share. Returns `{"deleted": "<name>"}`. Same safety validation as the detail endpoint. |
 | `DELETE` | `/api/snapshots` | Remove **every** snapshot folder under the transport share. Returns `{"deleted": [...], "failed": [{"name","error"}, ...]}`. Use with care — this is irreversible. |
+| `POST` | `/api/snapshots/prune` | Enforce snapshot retention immediately: delete oldest snapshots until ≤ 200 exist **and** total size ≤ 250 GB. Returns `{deleted[], errors[], remaining, total_bytes, total_human, checked_at}`. Also runs automatically every 10 minutes in the background. |
 | `POST` | `/api/jobs/backup` | Start a backup job (see payload below) |
 | `POST` | `/api/jobs/restore` | Start a restore job (see payload below) |
 | `GET`  | `/api/jobs` | List all jobs with status |
 | `GET`  | `/api/jobs/{id}` | Job detail + full log lines |
 | `WS`   | `/ws/{id}` | WebSocket stream — real-time progress lines |
+| `POST` | `/api/query` | Execute T-SQL as `vss_developer` on any registered server. Body: `{host, database, sql}`. Returns `{results: [{columns[], rows[][]}, …], elapsed_ms}`. Dangerous statements (`SHUTDOWN`, `xp_cmdshell`, `sp_oacreate`, `xp_regwrite`) are blocked with HTTP 403. |
+| `POST` | `/api/setup/dev-login` | Provision the `vss_developer` SQL login on the named server. Body: `{host, password}`. Grants `VIEW SERVER STATE`, `VIEW ANY DATABASE` at server level, and `db_datareader` + `db_datawriter` + `VIEW DATABASE STATE` in every user database. |
 
 **Backup payload**
 ```json
@@ -926,8 +929,10 @@ Field reference:
 | **SQL Server sidebar** | Lists all servers from `.venv/config.env`; supports adding/removing extra servers at runtime |
 | **Backup tab** | Source server picker → live DB list (state + recovery model); compress toggle; **Copy-only** toggle (VSS_BT_COPY); parallel slider 1–10; optional T-log verify. The DB list auto-loads on page open for the pre-selected source (no extra click required) and on every dropdown change, powered by the `mssql-python`-direct `/api/databases` endpoint. |
 | **Restore tab** | Snapshot dropdown — each option shows `YYYY-MM-DD HH:MM:SS — <snapshot_name> [db1, db2]` and the list is sorted by the snapshot folder's mtime (newest first); target server picker (same-or-different); per-DB **rename** textbox plus **Move data dir** and **Move log dir** inputs (combine rename + move for a side-by-side restore on the same server); **Overwrite existing** toggle; live conflict banner that queries `/api/databases/exists` against the target; T-log chain toggle with T-log source dropdown; parallel slider; PITR datetime picker |
-| **Snapshots tab** | Table view of every snapshot folder under the transport share: name, created timestamp, DB list, total size. Per-row **Details** button opens a modal with the full file tree and per-file sizes (via `/api/snapshots/{name}`); per-row **Delete** removes one snapshot; header-level **Delete all** wipes every snapshot folder. Header summary shows snapshot count + aggregate size. |
-| **Jobs tab** | Full job history table with type/status badges and per-job log button |
+| **Snapshots tab** | Table view of every snapshot folder under the transport share: name, created timestamp, DB list, total size. Per-row **Details** button opens a modal with the full file tree and per-file sizes (via `/api/snapshots/{name}`); per-row **Delete** removes one snapshot; multi-select + **Delete selected**; header-level **Delete all** wipes every snapshot folder. Header summary shows snapshot count + aggregate size. |
+| **Jobs tab** | Paginated job history (25 per page) with time-range filter (Last 1 h / 6 h / 24 h / 7 d / All), Prometheus-style filter expression, multi-column sort (click header, Shift-click for secondary sort with numbered badge), type/status badges, and per-job **View log** button |
+| **Job log modal** | Full-screen-height scrollable dark terminal panel; WebSocket streams output in real time; drag the splitter between log and results; shows exit code and elapsed time on completion |
+| **Query tab** | SSMS-like T-SQL editor — dark `#1e1e1e` theme, line numbers, Tab-to-indent (4 spaces), Ctrl+Enter to run, GO-batch splitting, multiple result sets in Bootstrap tabs, draggable editor/results splitter, server + database dropdowns, last-40-query history in `localStorage`, **Setup Login** button to provision `vss_developer`. See §13.6. |
 | **Progress modal** | Terminal-style dark log panel; WebSocket streams output in real time; shows exit code on completion |
 | **Running badge** | Header badge pulses while any job is in-flight (auto-refreshes every 4 s) |
 
@@ -941,6 +946,7 @@ Backup-Restore-VSS/
     server.py               ← FastAPI app (all routes + WebSocket)
     config.py               ← server registry (built-ins + servers.json)
     jobs.py                 ← background job manager + WS broadcaster
+    metrics.py              ← Prometheus /metrics instrumentation
     servers.json            ← runtime-added servers (auto-created, gitignored)
     runners/
       backup.py             ← backup-only subprocess runner
@@ -948,6 +954,115 @@ Backup-Restore-VSS/
     static/
       index.html            ← Bootstrap 5 SPA shell
       app.js                ← all frontend logic
+```
+
+### 13.6 Query Window (T-SQL developer console)
+
+The **Query** tab gives operators a lightweight SSMS-style SQL editor backed
+by a restricted `vss_developer` SQL login.
+
+**First-time setup (once per SQL Server host)**
+
+1. Click the **Query** tab.
+2. Select the target server from the *Server* dropdown (populated live from `/api/servers`).
+3. Click **Setup Login**, enter a password — the server provisions `vss_developer` on that host automatically.
+
+**Editor behaviour**
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl + Enter | Execute the query (or selected text) |
+| Tab | Insert 4 spaces |
+| ↑ / ↓ in history popup | Navigate query history |
+
+* Input is split on `GO` lines (case-insensitive) so multi-batch scripts run correctly.
+* Each batch can return multiple result sets; each is shown in a separate Bootstrap tab.
+* `NULL` values display as italic grey `NULL`.
+* The last 40 queries are saved in `localStorage` and reloadable with one click.
+
+**Security model**
+
+`vss_developer` is a SQL login with the minimum permissions needed for
+read-heavy diagnostic work:
+
+| Scope | Permission |
+|-------|-----------|
+| Server | `VIEW SERVER STATE`, `VIEW ANY DATABASE` |
+| Every user database | `db_datareader`, `db_datawriter`, `VIEW DATABASE STATE` |
+
+In addition, the `/api/query` endpoint blocks the following statements
+regardless of SQL Server permissions (defence-in-depth): `SHUTDOWN`,
+`xp_cmdshell`, `xp_regwrite`, `sp_oacreate`.
+
+The login password is stored in `.venv/config.env` as `DEV_PWD` and survives
+server restarts.
+
+### 13.7 Retention policies
+
+#### 13.7.1 Snapshot retention
+
+| Limit | Default |
+|-------|---------|
+| Maximum snapshot count | 200 |
+| Maximum total disk usage | 250 GB |
+
+The server enforces both limits simultaneously every 10 minutes in a
+background task, deleting the **oldest** snapshots first (by folder `mtime`).
+You can also trigger it manually:
+
+```bash
+curl -sX POST http://localhost:8765/api/snapshots/prune | python3 -m json.tool
+```
+
+Tune the limits in `vss_api/server.py`:
+
+```python
+SNAPSHOT_MAX_COUNT = 200
+SNAPSHOT_MAX_BYTES = 250 * 1024 ** 3   # 250 GB
+```
+
+#### 13.7.2 Job history retention
+
+| Limit | Default |
+|-------|---------|
+| Maximum finished jobs kept | 500 |
+| Maximum age of a finished job | 30 days |
+
+Pruning runs automatically every time a new job is created (in `JobStore.create()`).
+Running / pending jobs are **never** pruned.  Tune in `vss_api/jobs.py`:
+
+```python
+JOB_MAX_COUNT = 500
+JOB_MAX_DAYS  = 30
+```
+
+### 13.8 Running behind a reverse proxy (Cloudflare / nginx / HTTPS)
+
+No additional configuration is required:
+
+* All API calls use **relative URLs** (`/api/…`) so they follow the page origin automatically.
+* WebSocket URLs are constructed as `wss://` when the page is loaded over HTTPS
+  (`location.protocol === "https:"`) — Cloudflare Tunnel and nginx both proxy
+  WebSocket upgrades transparently.
+* The FastAPI app installs `uvicorn`'s `ProxyHeadersMiddleware` on startup so
+  real client IPs are correctly logged when `X-Forwarded-For` headers are present.
+
+Minimal nginx example:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name vss.example.com;
+    location / {
+        proxy_pass         http://127.0.0.1:8765;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade    $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host       $host;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+}
 ```
 
 ---

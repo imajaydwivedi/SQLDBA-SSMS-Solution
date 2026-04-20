@@ -15,6 +15,43 @@
     .badge-running{animation:pulse 1.2s infinite}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
     .sort-badge{background-color:#e9ecef;border-radius:10px;padding:0.15em 0.4em;margin-left:0.2em;color:#495057;font-weight:bold;font-size:0.7em;}
+    /* ── Query window ───────────────────────────── */
+    #tabQuery .tab-content{height:auto;overflow:visible}
+    .qry-toolbar{background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px;padding:8px 12px;margin-bottom:8px}
+    .qry-editor-wrap{display:flex;border:2px solid #3d3d3d;border-radius:4px;overflow:hidden;background:#1e1e1e;flex-shrink:0}
+    .qry-gutter{background:#252526;color:#5a5a5a;font-family:Consolas,Monaco,monospace;font-size:13px;padding:6px 10px;text-align:right;border-right:1px solid #3d3d3d;min-width:46px;overflow:hidden;white-space:pre;line-height:1.55;user-select:none;font-variant-numeric:tabular-nums}
+    #qryEditor{flex:1;border:none;outline:none;resize:none;background:#1e1e1e;color:#d4d4d4;font-family:Consolas,Monaco,monospace;font-size:13px;padding:6px 10px;line-height:1.55;caret-color:#569cd6;overflow:auto}
+    #qryEditor::placeholder{color:#555}
+    .qry-split-handle{height:6px;background:#ced4da;cursor:row-resize;flex-shrink:0;border-top:1px solid #adb5bd;border-bottom:1px solid #adb5bd;margin:2px 0}
+    .qry-split-handle:hover,.qry-split-handle:active{background:#6c757d}
+    /* SSMS-style output tab bar */
+    .qry-output-tabbar{display:flex;flex-shrink:0;background:#f0f0f0;border:1px solid #ccc;border-bottom:none}
+    .qry-out-tab{background:none;border:none;border-right:1px solid #ccc;border-bottom:3px solid transparent;padding:5px 16px;font-size:12px;cursor:pointer;color:#555;display:flex;align-items:center;gap:5px;white-space:nowrap;line-height:1.4}
+    .qry-out-tab:hover{background:#e4e4e4;color:#000}
+    .qry-out-tab.active{background:#fff;border-bottom:3px solid #005fb8;color:#000;font-weight:600}
+    .qry-out-tab .badge-count{background:#e0e0e0;border-radius:10px;padding:1px 6px;font-size:10px;color:#444;font-weight:normal}
+    /* Output panes */
+    #qryResultsPane,#qryMessagesPane{overflow:auto;min-height:0;background:#fff;border:1px solid #ccc;flex:1 1 0}
+    #qryResultsPane .table{margin-bottom:0;font-family:Consolas,Monaco,monospace;font-size:12px}
+    #qryResultsPane .table td,#qryResultsPane .table th{vertical-align:middle;white-space:nowrap}
+    #qryResultsPane .table td{max-width:320px;overflow:hidden;text-overflow:ellipsis}
+    #qryMessagesPane{padding:8px 12px;font-family:Consolas,Monaco,monospace;font-size:12px;color:#1f1f1f;white-space:pre-wrap;line-height:1.6}
+    .qry-msg-error{color:#c0392b}
+    .qry-msg-info{color:#555}
+    .qry-msg-ok{color:#16a085}
+    /* ── Settings ────────────────────────────────────────────────────────── */
+    .setting-row{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid #f0f0f0}
+    .setting-row:last-child{border-bottom:none}
+    .setting-label{flex:0 0 220px;font-size:13px;font-weight:500;padding-top:6px}
+    .setting-desc{font-size:11px;color:#888;margin-top:2px}
+    .setting-val{flex:1}
+    .setting-val input,.setting-val select{width:100%}
+    .settings-section-title{font-size:14px;font-weight:600;color:#333;margin-bottom:14px;
+                             padding-bottom:6px;border-bottom:2px solid #e0e0e0}
+    /* Role badges */
+    .role-admin  {background:#dc3545;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px}
+    .role-editor {background:#fd7e14;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px}
+    .role-viewer {background:#0d6efd;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px}
   </style>
 </head>
 <body>
@@ -36,9 +73,15 @@
       </button>
     </div>
     <div class="px-3 flex-grow-1 overflow-auto" id="serverList"></div>
-    <div class="px-3 py-2 border-top border-secondary" style="font-size:11px;color:#555">
-      Pure-VSS v1.0
+    <!-- Current user + logout -->
+    <div class="px-3 py-2 border-top border-secondary d-flex align-items-center gap-2" style="font-size:12px">
+      <i class="bi bi-person-circle" style="color:#aaa;font-size:15px"></i>
+      <span id="sidebarUser" style="color:#bbb;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span>
+      <a href="/auth/logout" title="Sign out" style="color:#888;text-decoration:none;font-size:14px">
+        <i class="bi bi-box-arrow-right"></i>
+      </a>
     </div>
+    <div class="px-3 pb-2" style="font-size:10px;color:#555">Pure-VSS v1.0</div>
   </div>
 
   <!-- ── Main area ───────────────────────────────────────────────────── -->
@@ -69,6 +112,15 @@
       <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabJobs" role="tab"
           onclick="loadJobs()">
         <i class="bi bi-list-task me-1"></i>Jobs</a></li>
+      <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabQuery" role="tab"
+          onclick="initQueryTab()">
+        <i class="bi bi-terminal me-1"></i>Query</a></li>
+      <!-- Settings tab — shown only for admin role -->
+      <li class="nav-item d-none" id="settingsNavItem">
+        <a class="nav-link" data-bs-toggle="tab" href="#tabSettings" role="tab"
+           onclick="initSettingsTab()">
+          <i class="bi bi-gear me-1"></i>Settings</a>
+      </li>
     </ul>
 
     <div class="tab-content px-4 pt-3" id="mainTabContent">
@@ -271,10 +323,10 @@
             <label class="form-label mb-0 small text-muted">Time:</label>
             <select class="form-select form-select-sm" id="jobTimeFilter" style="width:auto"
                     onchange="setJobsTimeFilter(this.value)">
-              <option value="all">All time</option>
+              <option value="all" selected>All time</option>
               <option value="1h">Last 1 h</option>
               <option value="6h">Last 6 h</option>
-              <option value="24h" selected>Last 24 h</option>
+              <option value="24h">Last 24 h</option>
               <option value="7d">Last 7 d</option>
               <option value="30d">Last 30 d</option>
             </select>
@@ -324,6 +376,133 @@
           </div>
         </div>
       </div>
+
+      <!-- ── Query tab ──────────────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tabQuery" role="tabpanel">
+        <div class="d-flex flex-column" style="height:calc(100vh - 145px)">
+
+          <!-- toolbar — light card so it's visually distinct from the dark editor -->
+          <div class="qry-toolbar d-flex flex-wrap gap-2 align-items-center flex-shrink-0">
+            <label class="fw-semibold small mb-0 text-secondary">Server</label>
+            <select class="form-select form-select-sm" id="qryHost" style="width:160px"
+                    onchange="loadQueryDatabases()">
+              <option value="">— loading… —</option>
+            </select>
+            <label class="fw-semibold small mb-0 text-secondary">Database</label>
+            <select class="form-select form-select-sm" id="qryDatabase" style="width:170px">
+              <option value="master">master</option>
+            </select>
+            <button class="btn btn-sm btn-success" id="qryRunBtn" onclick="runQuery()">
+              <i class="bi bi-play-fill me-1"></i>Run
+              <kbd class="ms-1 text-white border-0 bg-transparent" style="font-size:10px">Ctrl+Enter</kbd>
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="clearQuery()" title="Clear editor">
+              <i class="bi bi-x-circle"></i>
+            </button>
+            <div class="dropdown">
+              <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown"
+                      title="Query history">
+                <i class="bi bi-clock-history me-1"></i>History
+              </button>
+              <ul class="dropdown-menu" id="qryHistoryList"
+                  style="max-width:440px;max-height:320px;overflow-y:auto"></ul>
+            </div>
+            <!-- status badge (row count + elapsed) -->
+            <span id="qryMeta" class="small text-muted d-none ms-1"></span>
+            <button class="btn btn-sm btn-outline-warning ms-auto" onclick="setupDevLogin()"
+                    title="Provision vss_developer login on selected server">
+              <i class="bi bi-shield-check me-1"></i>Setup Login
+            </button>
+          </div>
+
+          <!-- editor + splitter + results -->
+          <div class="d-flex flex-column flex-grow-1" style="min-height:0">
+            <!-- SQL editor with line numbers -->
+            <div class="qry-editor-wrap" id="qryEditorWrap" style="height:220px">
+              <div class="qry-gutter" id="qryGutter">1</div>
+              <textarea id="qryEditor" spellcheck="false"
+                placeholder="-- T-SQL query here&#10;-- Ctrl+Enter to execute | Tab inserts 4 spaces | GO separates batches&#10;SELECT name, state_desc FROM sys.databases ORDER BY name;"></textarea>
+            </div>
+            <!-- drag splitter -->
+            <div class="qry-split-handle" id="qrySplitHandle" title="Drag to resize"></div>
+            <!-- SSMS-style output: tab bar + panes -->
+            <div class="d-flex flex-column flex-grow-1" style="min-height:0">
+              <!-- Tab bar -->
+              <div class="qry-output-tabbar">
+                <button class="qry-out-tab active" id="qryOutTabResults"
+                        onclick="switchQryOutputTab('results')">
+                  <i class="bi bi-table" style="font-size:13px"></i>
+                  Results
+                  <span class="badge-count" id="qryResultsBadge" style="display:none"></span>
+                </button>
+                <button class="qry-out-tab" id="qryOutTabMessages"
+                        onclick="switchQryOutputTab('messages')">
+                  <i class="bi bi-chat-left-text" style="font-size:13px"></i>
+                  Messages
+                  <span class="badge-count" id="qryMsgBadge" style="display:none"></span>
+                </button>
+              </div>
+              <!-- Results pane (tabular grids) -->
+              <div id="qryResultsPane" class="flex-grow-1">
+                <div class="text-muted text-center py-5" id="qryPlaceholder">
+                  <i class="bi bi-play-circle fs-3 d-block mb-2 opacity-25"></i>
+                  Run a query to see results
+                </div>
+              </div>
+              <!-- Messages pane (console text) -->
+              <div id="qryMessagesPane" class="flex-grow-1" style="display:none">
+                <span class="qry-msg-info">No messages.</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /tabQuery -->
+
+      <!-- ── Settings tab ───────────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tabSettings" role="tabpanel">
+        <div class="d-flex gap-0" style="min-height:560px">
+
+          <!-- Left sidebar: category list -->
+          <div class="border-end" style="width:180px;flex-shrink:0">
+            <div class="list-group list-group-flush" id="settingsCatList">
+              <a href="#" class="list-group-item list-group-item-action active small fw-semibold"
+                 data-cat="auth" onclick="loadSettingsCat('auth');return false">
+                <i class="bi bi-shield-lock me-2"></i>Authentication</a>
+              <a href="#" class="list-group-item list-group-item-action small"
+                 data-cat="smtp" onclick="loadSettingsCat('smtp');return false">
+                <i class="bi bi-envelope me-2"></i>SMTP / Email</a>
+              <a href="#" class="list-group-item list-group-item-action small"
+                 data-cat="oauth.google" onclick="loadSettingsCat('oauth.google');return false">
+                <i class="bi bi-google me-2"></i>Google OAuth</a>
+              <a href="#" class="list-group-item list-group-item-action small"
+                 data-cat="oauth.github" onclick="loadSettingsCat('oauth.github');return false">
+                <i class="bi bi-github me-2"></i>GitHub OAuth</a>
+              <a href="#" class="list-group-item list-group-item-action small"
+                 data-cat="query" onclick="loadSettingsCat('query');return false">
+                <i class="bi bi-terminal me-2"></i>Query Logins</a>
+              <a href="#" class="list-group-item list-group-item-action small"
+                 data-cat="retention" onclick="loadSettingsCat('retention');return false">
+                <i class="bi bi-archive me-2"></i>Retention</a>
+              <a href="#" class="list-group-item list-group-item-action small"
+                 data-cat="_users" onclick="loadUsersMgmt();return false">
+                <i class="bi bi-people me-2"></i>Users</a>
+              <a href="#" class="list-group-item list-group-item-action small"
+                 data-cat="_audit" onclick="loadAuditLog();return false">
+                <i class="bi bi-journal-text me-2"></i>Audit Log</a>
+            </div>
+          </div>
+
+          <!-- Right content area -->
+          <div class="flex-grow-1 p-3 overflow-auto" id="settingsContent">
+            <div class="text-muted text-center py-5">
+              <i class="bi bi-gear fs-3 d-block mb-2 opacity-25"></i>
+              Select a category on the left.
+            </div>
+          </div>
+        </div>
+      </div><!-- /tabSettings -->
+
     </div><!-- /tab-content -->
 
     <!-- ── Footer ─────────────────────────────────────────────────────── -->

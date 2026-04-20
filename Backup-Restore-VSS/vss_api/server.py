@@ -6,11 +6,11 @@ Start with:
 or simply:
     ./start-vss-gui.sh
 """
-import os, sys, glob, asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+import os, re, sys, glob, asyncio
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 
 HERE     = os.path.dirname(os.path.abspath(__file__))
@@ -20,9 +20,54 @@ sys.path.insert(0, VSS_ROOT)
 from vss_api.config import (list_servers, add_server, remove_server,
                              TRANSPORT_PATH, REQDIR)
 from vss_api.jobs import store
-from winrm_helper import sql_query_mssql
+import winrm_helper
+from winrm_helper import sql_query_mssql, sql_query_dev, run_ps
+
+# ── Auth imports ──────────────────────────────────────────────────────────────
+from vss_api.auth import AUTH_ENABLED, COOKIE_NAME, decode_token, ensure_default_admin, auth_enabled
+from vss_api.auth_routes import router as _auth_router
+from vss_api.settings_routes import router as _settings_router
+from vss_api import db as _db
 
 app = FastAPI(title="VSS Backup & Restore", version="1.0")
+
+# ── Auth router (must be included before middleware and static mounts) ─────────
+app.include_router(_auth_router)
+app.include_router(_settings_router)
+
+# ── Auth middleware ───────────────────────────────────────────────────────────
+# Paths that never require a session token.
+_PUBLIC_PREFIXES = ("/auth/", "/metrics", "/favicon", "/static/login")
+
+@app.middleware("http")
+async def _auth_gate(request: Request, call_next):
+    """Redirect unauthenticated requests to /auth/login when auth is enabled."""
+    if not auth_enabled():          # live DB check — respects Settings changes
+        return await call_next(request)
+    path = request.url.path
+    if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+        return await call_next(request)
+    token   = request.cookies.get(COOKIE_NAME)
+    payload = decode_token(token) if token else None
+    if not payload:
+        accept = request.headers.get("accept", "")
+        if "text/html" in accept and not path.startswith("/api/"):
+            return RedirectResponse("/auth/login", status_code=302)
+        return JSONResponse({"error": "Not authenticated", "detail": "Session required."},
+                            status_code=401)
+    # Stash role on request state so endpoints can access it without re-decoding
+    request.state.user_role = payload.get("role", "viewer")
+    request.state.username  = payload.get("sub", "")
+    return await call_next(request)
+
+# Trust X-Forwarded-* headers from a reverse proxy (Cloudflare, nginx, …).
+# This lets uvicorn log real client IPs and lets any future middleware that
+# checks request.client.host work correctly behind a tunnel.
+try:
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware  # noqa: E402
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+except ImportError:
+    pass  # older uvicorn — no-op, everything still works
 
 # Prometheus /metrics endpoint + HTTP + custom gauges. Must be installed
 # before any routes are registered so the middleware wraps every handler.
@@ -30,9 +75,79 @@ from vss_api import metrics as _metrics  # noqa: E402
 _metrics.install(app, TRANSPORT_PATH, list_servers)
 
 
+# ── Retention constants ───────────────────────────────────────────────────────
+SNAPSHOT_MAX_COUNT = 200
+SNAPSHOT_MAX_BYTES = 250 * 1024 ** 3   # 250 GB
+
+
+def apply_snapshot_retention() -> dict:
+    """Enforce snapshot retention: keep at most SNAPSHOT_MAX_COUNT snapshots
+    AND at most SNAPSHOT_MAX_BYTES total on disk.
+
+    Snapshots are deleted oldest-first (by folder mtime) until BOTH limits are
+    satisfied.  Returns a summary dict for logging / the API endpoint.
+    """
+    import shutil, datetime as _dt
+    root = os.path.abspath(TRANSPORT_PATH)
+    snaps = []
+    for d in glob.glob(os.path.join(root, "*")):
+        if not os.path.isdir(d):
+            continue
+        try:
+            snaps.append((os.path.getmtime(d), d))
+        except OSError:
+            pass
+    snaps.sort()                            # oldest first
+    total_bytes = sum(_dir_size(p) for _, p in snaps)
+    total_count = len(snaps)
+    deleted, errors = [], []
+    while snaps and (len(snaps) > SNAPSHOT_MAX_COUNT or total_bytes > SNAPSHOT_MAX_BYTES):
+        mtime, path = snaps.pop(0)          # remove oldest
+        name = os.path.basename(path)
+        size = _dir_size(path)
+        try:
+            shutil.rmtree(path)
+            deleted.append(name)
+            total_bytes -= size
+        except OSError as exc:
+            errors.append({"name": name, "error": str(exc)})
+    return {
+        "deleted":      deleted,
+        "errors":       errors,
+        "remaining":    len(snaps),
+        "total_bytes":  total_bytes,
+        "total_human":  _human_size(total_bytes),
+        "checked_at":   _dt.datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+@app.post("/api/snapshots/prune", status_code=200)
+def api_snapshot_prune():
+    """Manually trigger snapshot retention enforcement and return a summary."""
+    return apply_snapshot_retention()
+
+
 @app.on_event("startup")
 async def _startup():
     store.set_loop(asyncio.get_running_loop())
+    # Initialise SQLite DB (creates tables, bootstraps settings, migrates JSON users)
+    _db.init_db()
+    # Ensure default admin account exists
+    ensure_default_admin()
+    # Start background snapshot-retention checker (every 10 minutes).
+    asyncio.create_task(_snapshot_retention_loop())
+
+
+async def _snapshot_retention_loop():
+    """Periodically enforce snapshot retention in the background."""
+    while True:
+        await asyncio.sleep(600)           # 10-minute interval
+        try:
+            await asyncio.get_event_loop().run_in_executor(
+                None, apply_snapshot_retention
+            )
+        except Exception:
+            pass
 
 
 # ── Servers ───────────────────────────────────────────────────────────────────
@@ -331,6 +446,161 @@ async def ws_progress(ws: WebSocket, jid: str):
         pass
     finally:
         store.unsubscribe(jid, q)
+
+
+# ── Query Window ─────────────────────────────────────────────────────────────
+
+# Statements that must never be allowed through the developer account,
+# regardless of SQL Server permissions (defence-in-depth).
+_QRY_BLOCK = re.compile(
+    r'\b(shutdown|xp_cmdshell|xp_regwrite|xp_regread|sp_oacreate|'
+    r'sp_configure\s+[\'\"]show\s+advanced)',
+    re.IGNORECASE,
+)
+
+
+class QueryReq(BaseModel):
+    host:      str
+    database:  str = "master"
+    sql:       str
+    row_limit: int = Field(default=2000, ge=1, le=5000)
+
+
+@app.post("/api/query")
+def api_query(r: QueryReq, request: Request):
+    """Execute T-SQL using a role-appropriate SQL login.
+
+    Roles → SQL logins:
+      viewer → vss_reader (db_datareader only)
+      editor → vss_developer (db_datareader + db_datawriter)
+      admin  → sa (full access)
+
+    GO batches are split, every result set returned.
+    Dangerous statements are always blocked (defence-in-depth).
+    """
+    known = set(list_servers().keys())
+    if r.host not in known:
+        raise HTTPException(400, f"Unknown host: {r.host!r}")
+    if _QRY_BLOCK.search(r.sql):
+        raise HTTPException(403, "Query blocked: contains a forbidden statement.")
+
+    # Determine caller's role (set by auth middleware; fallback for open mode)
+    role = getattr(request.state, "user_role", "viewer")
+
+    # Select SQL credentials from DB settings
+    if role == "admin":
+        login = "sa"
+        pwd   = _db.get_setting("query.sa_pwd", "") or winrm_helper.SA_PWD
+    elif role == "editor":
+        login = _db.get_setting("query.editor_login", "vss_developer")
+        pwd   = _db.get_setting("query.editor_pwd", "")
+    else:  # viewer (default)
+        login = _db.get_setting("query.viewer_login", "vss_reader")
+        pwd   = _db.get_setting("query.viewer_pwd", "")
+
+    if not pwd:
+        raise HTTPException(503,
+            f"SQL password for role '{role}' not configured. "
+            "Go to Settings → Query to set it.")
+
+    results, elapsed_ms, err = sql_query_dev(
+        r.host, r.sql, database=r.database,
+        timeout=60, row_limit=r.row_limit,
+        login=login, pwd=pwd,
+    )
+    return {"results": results, "elapsed_ms": elapsed_ms, "error": err or None}
+
+
+# ── Dev-login provisioning ────────────────────────────────────────────────────
+
+class DevLoginSetupReq(BaseModel):
+    host:    str
+    dev_pwd: str
+
+
+def _dev_login_ps(dev_user: str, dev_pwd: str, sa_pwd: str) -> str:
+    """Return a PowerShell script that provisions ``dev_user`` on the local
+    SQL Server instance with VIEW SERVER STATE, VIEW ANY DATABASE, and
+    db_datareader + db_datawriter on every database (including msdb).
+    """
+    # Use plain replacement to avoid f-string / PowerShell brace conflicts.
+    return """
+$ErrorActionPreference = 'Stop'
+$login = '__DEV_USER__'
+$pwd   = '__DEV_PWD__'
+$sa    = '__SA_PWD__'
+
+# 1. Create / update the login and grant server-level permissions
+$q1 = @"
+IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = '$login' AND type_desc = 'SQL_LOGIN')
+    CREATE LOGIN [$login] WITH PASSWORD = N'$pwd', CHECK_POLICY = OFF, CHECK_EXPIRATION = OFF;
+ELSE
+    ALTER LOGIN [$login] WITH PASSWORD = N'$pwd';
+ALTER LOGIN [$login] ENABLE;
+GRANT VIEW SERVER STATE TO [$login];
+GRANT VIEW ANY DATABASE  TO [$login];
+"@
+Invoke-Sqlcmd -ServerInstance localhost -Username sa -Password $sa -Query $q1 -QueryTimeout 60
+Write-Host "Server-level permissions granted."
+
+# 2. Per-database user + roles (skip tempdb)
+$dbs = Invoke-Sqlcmd -ServerInstance localhost -Username sa -Password $sa `
+    -Query "SELECT name FROM sys.databases WHERE name <> 'tempdb' ORDER BY database_id" `
+    -QueryTimeout 30
+foreach ($row in $dbs) {
+    $db = $row.name
+    $q2 = @"
+USE [$db];
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = '$login')
+    CREATE USER [$login] FOR LOGIN [$login];
+IF IS_ROLEMEMBER('db_datareader', '$login') = 0 EXEC sp_addrolemember 'db_datareader', '$login';
+IF IS_ROLEMEMBER('db_datawriter', '$login') = 0 EXEC sp_addrolemember 'db_datawriter', '$login';
+GRANT VIEW DATABASE STATE TO [$login];
+"@
+    try {
+        Invoke-Sqlcmd -ServerInstance localhost -Username sa -Password $sa -Query $q2 -QueryTimeout 30
+        Write-Host "Configured: $db"
+    } catch {
+        Write-Host ("WARN $db : " + $_.Exception.Message)
+    }
+}
+Write-Host "Done — $login provisioned."
+""".replace("__DEV_USER__", dev_user) \
+   .replace("__DEV_PWD__",  dev_pwd)  \
+   .replace("__SA_PWD__",   sa_pwd)
+
+
+def _persist_dev_pwd(pwd: str):
+    """Update DEV_PWD in .venv/config.env and in the live winrm_helper module."""
+    cfg_path = os.path.join(VSS_ROOT, ".venv", "config.env")
+    try:
+        with open(cfg_path) as f:
+            lines = f.readlines()
+        out = [l for l in lines if not l.startswith("DEV_PWD=")]
+        out.append(f"DEV_PWD={pwd}\n")
+        with open(cfg_path, "w") as f:
+            f.writelines(out)
+    except Exception:
+        pass   # non-fatal — live update still works
+    winrm_helper.DEV_PWD = pwd
+    # Evict any stale dev connections so they reconnect with the new password.
+    winrm_helper._DEV_POOL.clear()
+
+
+@app.post("/api/setup/dev-login")
+def api_setup_dev_login(r: DevLoginSetupReq):
+    """Provision vss_developer on ``host`` and persist the password."""
+    known = set(list_servers().keys())
+    if r.host not in known:
+        raise HTTPException(400, f"Unknown host: {r.host!r}")
+    if not r.dev_pwd or len(r.dev_pwd) < 6:
+        raise HTTPException(400, "dev_pwd must be at least 6 characters.")
+    ps  = _dev_login_ps(winrm_helper.DEV_USER, r.dev_pwd, winrm_helper.SA_PWD)
+    out, err, rc = run_ps(r.host, ps, timeout=180)
+    if rc != 0:
+        raise HTTPException(500, f"Setup failed on {r.host}:\n{err[:800]}\n{out[:400]}")
+    _persist_dev_pwd(r.dev_pwd)
+    return {"ok": True, "host": r.host, "output": out[:3000]}
 
 
 # ── Static files (SPA) ────────────────────────────────────────────────────────

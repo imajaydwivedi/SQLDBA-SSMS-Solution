@@ -61,6 +61,13 @@ SHARE_LINUX_PATH = _require("SHARE_LINUX_PATH")
 HV_NAME          = _require("HV_NAME")
 HV_IP            = _require("HV_IP")
 
+# ── vss_developer read/write account ──────────────────────────────────────────
+# Lower-privilege SQL login used by the web Query window.  Password is stored
+# in .venv/config.env (DEV_PWD); the POST /api/setup/dev-login endpoint
+# provisions the login and writes the password there on first use.
+DEV_USER = _CFG.get("DEV_USER", "vss_developer")
+DEV_PWD  = _CFG.get("DEV_PWD", "")   # empty until provisioned
+
 def get_session(host_key, read_timeout_sec=120, operation_timeout_sec=110):
     h = HOSTS[host_key]
     return winrm.Session(
@@ -162,6 +169,113 @@ def sql_exec_mssql(host_key, query, params=None, database="master", timeout=30):
     except Exception as e:
         _MSSQL_POOL.pop(host_key, None)
         return str(e), 1
+
+# ── vss_developer connection pool ────────────────────────────────────────────
+# Keyed on (host_key, database) so each target database gets its own connection
+# and the pool doesn't accidentally run queries in the wrong database context.
+_DEV_POOL: dict = {}
+
+
+def _dev_connect(host_key, database="master", timeout=15, login=None, pwd=None):
+    """Open/reuse a direct TCP connection using the given SQL login.
+
+    Falls back to DEV_USER/DEV_PWD when login/pwd are not supplied.
+    Dead connections are evicted and rebuilt automatically.
+    """
+    import mssql_python
+    _login = login or DEV_USER
+    _pwd   = pwd   or DEV_PWD
+    if not _pwd:
+        raise RuntimeError(
+            f"Password for SQL login '{_login}' is not set. "
+            "Configure it in Settings → Query or click 'Setup Login'."
+        )
+    key = (host_key, database, _login)       # scope pool by login so roles don't share
+    conn = _DEV_POOL.get(key)
+    if conn is not None:
+        try:
+            cur = conn.cursor(); cur.execute("SELECT 1"); cur.fetchone()
+            return conn
+        except Exception:
+            try: conn.close()
+            except Exception: pass
+            _DEV_POOL.pop(key, None)
+    h = HOSTS[host_key]
+    cs = (f"SERVER={h['ip']},1433;DATABASE={database};"
+          f"UID={_login};PWD={_pwd};"
+          f"Encrypt=no;TrustServerCertificate=yes;")
+    conn = mssql_python.connect(cs, autocommit=True, timeout=timeout)
+    _DEV_POOL[key] = conn
+    return conn
+
+
+def _split_go(sql: str) -> list:
+    """Split T-SQL on GO lines (like SSMS).  Case-insensitive; GO on its own
+    line (optional trailing whitespace/count ignored).
+    """
+    import re
+    return re.split(r'(?im)^\s*GO(?:\s+\d+)?\s*$', sql)
+
+
+def sql_query_dev(host_key, query, database="master", timeout=60, row_limit=2000,
+                  login=None, pwd=None):
+    """Execute T-SQL as vss_developer and return all result sets.
+
+    Splits ``query`` on GO lines into individual batches (SSMS behaviour).
+
+    Returns ``(results, elapsed_ms, err)`` where ``results`` is a list of
+    dicts::
+        [{"columns": [str, …], "rows": [[val, …], …],
+          "row_count": int, "truncated": bool}, …]
+
+    ``err`` is an empty string on success; non-empty on the first error.
+    Previous successful result sets are still returned when an error occurs.
+    """
+    import time as _t
+    t0 = _t.time()
+    try:
+        batches = [b.strip() for b in _split_go(query) if b.strip()]
+        if not batches:
+            return [], 0, "Empty query."
+        conn    = _dev_connect(host_key, database=database, timeout=timeout,
+                               login=login, pwd=pwd)
+        results = []
+        for batch in batches:
+            cur = conn.cursor()
+            try:
+                cur.execute(batch)
+            except Exception as e:
+                elapsed = int((_t.time() - t0) * 1000)
+                return results, elapsed, str(e)
+            # Drain all result sets from this batch
+            while True:
+                if cur.description:
+                    cols = [d[0] for d in cur.description]
+                    rows = []
+                    truncated = False
+                    for i, row in enumerate(cur):
+                        if i >= row_limit:
+                            truncated = True
+                            break
+                        rows.append(
+                            [None if v is None else str(v) for v in row]
+                        )
+                    results.append({
+                        "columns":   cols,
+                        "rows":      rows,
+                        "row_count": len(rows),
+                        "truncated": truncated,
+                    })
+                try:
+                    if not cur.nextset():
+                        break
+                except Exception:
+                    break
+        return results, int((_t.time() - t0) * 1000), ""
+    except Exception as e:
+        _DEV_POOL.pop((host_key, database), None)
+        return [], int((_t.time() - t0) * 1000), str(e)
+
 
 def sql_query_fast(host_key, query, database="master", timeout=30):
     """Run a T-SQL query via System.Data.SqlClient — bypasses the SqlServer

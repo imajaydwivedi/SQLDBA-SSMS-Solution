@@ -3,10 +3,18 @@
 Each job runs in a daemon thread (so long-running WinRM calls don't block
 the event loop).  Progress lines are pushed to per-subscriber asyncio.Queues
 so the WebSocket endpoint can stream them to the browser in real time.
+
+Retention policy (enforced automatically on every new job):
+  JOB_MAX_COUNT — keep at most this many finished jobs (running jobs are never pruned)
+  JOB_MAX_DAYS  — prune finished jobs older than this many days
 """
 import asyncio, subprocess, uuid, datetime, threading
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Set
+
+# Retention limits — adjust here if needed.
+JOB_MAX_COUNT = 500
+JOB_MAX_DAYS  = 30
 
 
 @dataclass
@@ -37,7 +45,36 @@ class JobStore:
         with self._lock:
             self._jobs[jid] = job
             self._subs[jid] = set()
+        self._prune()
         return job
+
+    def _prune(self) -> None:
+        """Remove finished jobs that exceed JOB_MAX_COUNT or JOB_MAX_DAYS.
+
+        Running / pending jobs are never pruned so in-flight work is never lost.
+        Oldest jobs (by started_at) are removed first.
+        """
+        cutoff = (
+            datetime.datetime.now() - datetime.timedelta(days=JOB_MAX_DAYS)
+        ).isoformat(timespec="seconds")
+
+        with self._lock:
+            finished = [
+                j for j in self._jobs.values()
+                if j.status not in ("running", "pending")
+            ]
+            # Sort oldest-first
+            finished.sort(key=lambda j: j.started_at or "")
+            # 1) Remove any job older than JOB_MAX_DAYS
+            to_delete = {j.id for j in finished if (j.started_at or "") < cutoff}
+            # 2) If still over JOB_MAX_COUNT, remove the oldest extras
+            remaining = [j for j in finished if j.id not in to_delete]
+            if len(remaining) > JOB_MAX_COUNT:
+                extras = remaining[: len(remaining) - JOB_MAX_COUNT]
+                to_delete.update(j.id for j in extras)
+            for jid in to_delete:
+                self._jobs.pop(jid, None)
+                self._subs.pop(jid, None)
 
     def get(self, jid: str) -> Optional[Job]:
         return self._jobs.get(jid)
