@@ -999,17 +999,15 @@ each stage; the latest authoritative copy lives at
 mirrored here for the benefit of offline readers.
 
 <!-- E2E_RESULTS_BEGIN -->
-| 2 | restore-overwrite all (4 DBs) -> SqlPoc | PASS | 72.1 | rc=0; CDCDemo=ONLINE, Db2=ONLINE, DBA=ONLINE, Facebook=ONLINE |
+| 2 | restore-overwrite all (4 DBs) -> SqlPoc | PASS | 76.1 | rc=0; CDCDemo=ONLINE, Db2=ONLINE, DBA=ONLINE, Facebook=ONLINE |
 | 11 | restore without --overwrite is rejected | PASS | 2.0 | expected non-zero rc; got rc=2; pre=ONLINE; post=ONLINE |
 | 3 | restore Db2 with move-data/move-log | PASS | 6.0 | rc=0; state=ONLINE; files=[Db2:D:\MSSQL_ALT\DATA\Db2.mdf | Db2_log:D:\MSSQL_ALT\LOG\Db2_log.ldf] |
 | 4 | side-by-side restore (orig ONLINE + copy ONLINE) | PASS | 4.0 | rc=0; Db2(orig)=ONLINE; Db2_SideBySide2=ONLINE |
-| 5 | rename restore DBA -> DBA_Copy | PASS | 70.1 | rc=0; state=ONLINE; file_count=2 |
-| 6 | Db2 restore with t-log chain verify | PASS | 34.0 | rc=0; state=ONLINE; _vss_marker_rows=31 |
-| 9 | PITR restore Db2 WITH STOPAT | PASS | 20.0 | rc=0; state=ONLINE; stopat=2026-04-20T13:27:11; tags(current)=[pre_20260420132709:True,post_20260420132709:False] |
-| 7 | partial+compressed backup (Db2+DBA) | PASS | 490.4 | snapshot=t7_partial_compressed_20260420_132734; contents=['DBA', 'Db2', 'backup_components.xml', 'writer_metadata']; size=5.4 GB; rc=0 |
-| 8 | restore DBA from compressed partial snapshot | PASS | 72.1 | rc=0; state=ONLINE; file_count=2 |
-| 10 | non-copy-only backup bumps diff_base_lsn | PASS | 250.2 | rc=0; before=5951000002006300279; after=5951000004170900012; bumped=True; snapshot=t10_full_dba_20260420_133657 (2.0 GB) |
-| 12 | API + /metrics + mssql-python pool health | PASS | 0.1 | max_latency=0.013s; avg=0.006s; /metrics rc=200; vss_api_* present=True |
+| 5 | rename restore DBA -> DBA_Copy | PASS | 46.0 | rc=0; state=ONLINE; file_count=2 |
+| 6 | Db2 restore with t-log chain verify | PASS | 44.0 | rc=0; state=ONLINE; _vss_marker_rows=37 |
+| 9 | PITR restore Db2 WITH STOPAT | PASS | 30.0 | rc=0; state=ONLINE; stopat=2026-04-20T15:26:45; tags(current)=[pre_20260420152643:True,post_20260420152643:False] |
+| 7 | partial+compressed backup (Db2+DBA) | PASS | 498.4 | snapshot=t7_partial_compressed_20260420_152719; contents=['DBA', 'Db2', 'backup_components.xml', 'writer_metadata']; size=5.4 GB; rc=0 |
+| 8 | restore DBA from compressed partial snapshot | PASS | 74.1 | rc=0; state=ONLINE; file_count=2 |
 <!-- E2E_RESULTS_END -->
 
 **How to re-run the entire suite**
