@@ -16,7 +16,7 @@ HERE     = os.path.dirname(os.path.abspath(__file__))
 VSS_ROOT = os.path.dirname(os.path.dirname(HERE))   # Backup-Restore-VSS/
 sys.path.insert(0, VSS_ROOT)
 
-from winrm_helper import run_ps, sqlcmd, load_config
+from winrm_helper import run_ps, sql_query_mssql, load_config
 
 _cfg          = load_config()
 SHARE_UNC     = _cfg.get("SHARE_UNC", r"\\192.168.122.1\vss-transport")
@@ -48,12 +48,17 @@ print(f"[backup] compress={args.compress}  parallel={args.parallel}  copy_only={
 print(f"[backup] output UNC : {out_unc}")
 print(f"[backup] output path: {out_lin}")
 
-# ── Source DB state ───────────────────────────────────────────────────────────
+# ── Source DB state (direct mssql-python — no PowerShell hop) ────────────────
 qlist = ",".join(f"'{d}'" for d in dbs)
-out, _, _ = sqlcmd(args.source,
+rows, err, rc = sql_query_mssql(args.source,
     f"SELECT name, state_desc, recovery_model_desc "
     f"FROM sys.databases WHERE name IN ({qlist}) ORDER BY name")
-print("[backup] Source DB states:"); print(out)
+print("[backup] Source DB states:")
+if rc == 0:
+    for r in rows:
+        print(f"  {str(r[0]):<24} {str(r[1]):<10} {r[2]}")
+else:
+    print(f"  <query failed: {err[:200]}>")
 
 # ── VssBackup.exe ─────────────────────────────────────────────────────────────
 extra = []

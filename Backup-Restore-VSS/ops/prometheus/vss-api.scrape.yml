@@ -1,0 +1,15 @@
+# Append this block under `scrape_configs:` in /etc/prometheus/prometheus.yml
+# (at the same indent level as the existing `- job_name: prometheus` entry).
+#
+# The VSS Backup & Restore web API exposes Prometheus metrics on
+#   http://<hypervisor>:8765/metrics
+# See vss-backup-kvm.md §13.5 for the metric catalogue.
+  - job_name: vss_api
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "localhost:8765"
+        labels:
+          app: vss-backup-restore
+          component: web-api

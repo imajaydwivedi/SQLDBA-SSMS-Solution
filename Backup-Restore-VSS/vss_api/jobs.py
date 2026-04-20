@@ -68,9 +68,17 @@ class JobStore:
 
     # ── subprocess execution (runs in a daemon thread) ───────────────────────
     def run_subprocess(self, job: Job, cmd: List[str], cwd: str = None) -> None:
+        import time as _time
+        try:
+            from vss_api import metrics as _m
+        except Exception:
+            _m = None  # metrics import failures must never break job execution
+
         def _run():
             job.status     = "running"
             job.started_at = datetime.datetime.now().isoformat(timespec="seconds")
+            started_epoch  = _time.time()
+            if _m: _m.on_job_start(job.type)
             self._push(job.id, f"[VSS-GUI] cmd: {' '.join(cmd)}\n")
             try:
                 proc = subprocess.Popen(
@@ -94,6 +102,9 @@ class JobStore:
                 job.status = "failed"
             finally:
                 job.finished_at = datetime.datetime.now().isoformat(timespec="seconds")
+                if _m:
+                    try: _m.on_job_finish(job.type, job.status, started_epoch)
+                    except Exception: pass
                 self._push(job.id, "__DONE__\n")
 
         threading.Thread(target=_run, daemon=True).start()

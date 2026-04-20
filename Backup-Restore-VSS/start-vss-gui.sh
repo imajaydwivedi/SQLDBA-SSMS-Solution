@@ -40,6 +40,16 @@ if ! python3 -c "import fastapi, uvicorn" &>/dev/null; then
   pip3 install --quiet fastapi "uvicorn[standard]"
 fi
 
+# ── Install mssql-python + prometheus deps if not already present ─────────────
+if ! python3 -c "import mssql_python" &>/dev/null; then
+  echo "[start-vss-gui] Installing mssql-python (Microsoft's official driver) ..."
+  pip3 install --quiet mssql-python
+fi
+if ! python3 -c "import prometheus_client, prometheus_fastapi_instrumentator" &>/dev/null; then
+  echo "[start-vss-gui] Installing prometheus-client + prometheus-fastapi-instrumentator ..."
+  pip3 install --quiet prometheus-client prometheus-fastapi-instrumentator
+fi
+
 # ── Derive local IP for convenience ──────────────────────────────────────────
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 

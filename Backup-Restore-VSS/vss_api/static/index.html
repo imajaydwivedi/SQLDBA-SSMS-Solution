@@ -11,9 +11,10 @@
     .sidebar .brand{font-size:1rem;font-weight:700;letter-spacing:.5px}
     .srv-card{background:rgba(255,255,255,.06);border-radius:6px;padding:8px 10px;margin-bottom:6px}
     .tab-content{height:calc(100vh - 110px);overflow-y:auto}
-    pre#progressLog{min-height:400px;max-height:60vh;overflow-y:auto;font-size:11.5px;white-space:pre-wrap;word-break:break-all}
+    pre#progressLog{font-size:11.5px;white-space:pre-wrap;word-break:break-all;overflow-y:auto;flex:1 1 0;min-height:0}
     .badge-running{animation:pulse 1.2s infinite}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    .sort-badge{background-color:#e9ecef;border-radius:10px;padding:0.15em 0.4em;margin-left:0.2em;color:#495057;font-weight:bold;font-size:0.7em;}
   </style>
 </head>
 <body>
@@ -80,8 +81,14 @@
               <div class="card-header fw-semibold"><i class="bi bi-server me-1"></i>Source</div>
               <div class="card-body">
                 <label class="form-label">SQL Server (source)</label>
-                <select class="form-select form-select-sm" id="bkpSource"
-                        onchange="loadDatabases('bkpSource','bkpDbList')"></select>
+                <div class="input-group input-group-sm">
+                  <select class="form-select" id="bkpSource"
+                          onchange="loadDatabases('bkpSource','bkpDbList')"></select>
+                  <button class="btn btn-outline-secondary" type="button" title="Reload database list"
+                          onclick="loadDatabases('bkpSource','bkpDbList')">
+                    <i class="bi bi-arrow-clockwise"></i>
+                  </button>
+                </div>
                 <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
                   <label class="form-label mb-0">Databases</label>
                   <span>
@@ -215,14 +222,20 @@
 
       <!-- ── Snapshots tab ────────────────────────────────────────── -->
       <div class="tab-pane fade" id="tabSnapshots" role="tabpanel">
-        <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
           <h6 class="mb-0">
             <i class="bi bi-hdd-stack me-1"></i>Available snapshots
             <small class="text-muted ms-2" id="snapSummary"></small>
           </h6>
-          <div class="d-flex gap-2">
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <input type="search" class="form-control form-control-sm" id="snapFilter"
+                   placeholder="Filter by name or DB…" style="width:220px"
+                   oninput="renderSnapshotsTable()">
             <button class="btn btn-sm btn-outline-secondary" onclick="loadSnapshotsPage()">
               <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
+            <button class="btn btn-sm btn-outline-danger" id="btnDeleteSelectedSnapshots" style="display:none;" onclick="deleteSelectedSnapshots()">
+              <i class="bi bi-trash me-1"></i>Delete selected
             </button>
             <button class="btn btn-sm btn-outline-danger" onclick="deleteAllSnapshots()">
               <i class="bi bi-trash3 me-1"></i>Delete all
@@ -233,6 +246,7 @@
           <table class="table table-sm table-hover align-middle" style="font-size:13px">
             <thead class="table-light">
               <tr>
+                <th style="width:32px"><input class="form-check-input" type="checkbox" id="chkAllSnapshots" onclick="toggleAllSnapshots(this.checked)"></th>
                 <th style="width:32px"></th>
                 <th>Name</th>
                 <th>Created</th>
@@ -242,7 +256,7 @@
               </tr>
             </thead>
             <tbody id="snapshotsTable">
-              <tr><td colspan="6" class="text-muted text-center py-3">Loading…</td></tr>
+              <tr><td colspan="7" class="text-muted text-center py-3">Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -250,31 +264,110 @@
 
       <!-- ── Jobs tab ─────────────────────────────────────────────── -->
       <div class="tab-pane fade" id="tabJobs" role="tabpanel">
-        <div class="d-flex justify-content-between align-items-center mb-3">
+        <!-- toolbar row 1: title + quick-time filter + per-page -->
+        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
           <h6 class="mb-0">Job History</h6>
-          <button class="btn btn-sm btn-outline-secondary" onclick="loadJobs()">
-            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-          </button>
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <label class="form-label mb-0 small text-muted">Time:</label>
+            <select class="form-select form-select-sm" id="jobTimeFilter" style="width:auto"
+                    onchange="setJobsTimeFilter(this.value)">
+              <option value="all">All time</option>
+              <option value="1h">Last 1 h</option>
+              <option value="6h">Last 6 h</option>
+              <option value="24h" selected>Last 24 h</option>
+              <option value="7d">Last 7 d</option>
+              <option value="30d">Last 30 d</option>
+            </select>
+            <label class="form-label mb-0 small text-muted">Per page:</label>
+            <select class="form-select form-select-sm" id="jobPageSize" style="width:auto"
+                    onchange="setJobsPageSize(+this.value)">
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="0">All</option>
+            </select>
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadJobs()">
+              <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
+          </div>
         </div>
-        <div id="jobsTable"><p class="text-muted">No jobs yet.</p></div>
+        <!-- toolbar row 2: prometheus-style search -->
+        <div class="mb-2">
+          <input type="search" class="form-control form-control-sm" id="jobFilter"
+                 title='Examples: status:failed  type:"backup"  label:t1  started:">24h ago"'
+                 placeholder='Search / filter… (e.g. status:failed  type:restore  label:t1)'
+                 oninput="renderJobsTable()">
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle">
+            <thead class="table-light sticky-top"><tr>
+              <th style="cursor:pointer;white-space:nowrap;user-select:none" onclick="sortJobs('id',event.shiftKey)" title="Shift+Click for multi-column sort">ID <i class="bi bi-arrow-down-up ms-1 text-muted" style="font-size:0.8em;opacity:0.4"></i></th>
+              <th style="cursor:pointer;white-space:nowrap;user-select:none" onclick="sortJobs('type',event.shiftKey)" title="Shift+Click for multi-column sort">Type <i class="bi bi-arrow-down-up ms-1 text-muted" style="font-size:0.8em;opacity:0.4"></i></th>
+              <th style="cursor:pointer;white-space:nowrap;user-select:none" onclick="sortJobs('label',event.shiftKey)" title="Shift+Click for multi-column sort">Label <i class="bi bi-arrow-down-up ms-1 text-muted" style="font-size:0.8em;opacity:0.4"></i></th>
+              <th style="cursor:pointer;white-space:nowrap;user-select:none" onclick="sortJobs('status',event.shiftKey)" title="Shift+Click for multi-column sort">Status <i class="bi bi-arrow-down-up ms-1 text-muted" style="font-size:0.8em;opacity:0.4"></i></th>
+              <th style="cursor:pointer;white-space:nowrap;user-select:none" onclick="sortJobs('started_at',event.shiftKey)" title="Shift+Click for multi-column sort">Started <i class="bi bi-arrow-down-up ms-1 text-muted" style="font-size:0.8em;opacity:0.4"></i></th>
+              <th style="cursor:pointer;white-space:nowrap;user-select:none" onclick="sortJobs('finished_at',event.shiftKey)" title="Shift+Click for multi-column sort">Finished <i class="bi bi-arrow-down-up ms-1 text-muted" style="font-size:0.8em;opacity:0.4"></i></th>
+              <th></th>
+            </tr></thead>
+            <tbody id="jobsTable"><tr><td colspan="7" class="text-muted text-center py-3">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <!-- pagination -->
+        <div class="d-flex justify-content-between align-items-center mt-1 small">
+          <span id="jobsPaginationInfo" class="text-muted"></span>
+          <div id="jobsPaginationCtrl" class="d-flex gap-1 align-items-center">
+            <button class="btn btn-sm btn-outline-secondary px-2 py-0" id="jobsPrevBtn"
+                    onclick="setJobsPage(_jobsPage-1)">&#8249; Prev</button>
+            <span id="jobsPageNum" class="px-2 text-muted"></span>
+            <button class="btn btn-sm btn-outline-secondary px-2 py-0" id="jobsNextBtn"
+                    onclick="setJobsPage(_jobsPage+1)">Next &#8250;</button>
+          </div>
+        </div>
       </div>
     </div><!-- /tab-content -->
+
+    <!-- ── Footer ─────────────────────────────────────────────────────── -->
+    <footer class="mt-4 pt-3 border-top text-muted small d-flex justify-content-between flex-wrap gap-2">
+      <span>
+        <i class="bi bi-hdd-network me-1"></i>
+        <span id="footServers">0</span> server(s) •
+        <span id="footSnaps">0</span> snapshot(s) •
+        <span id="footJobs">0</span> job(s)
+      </span>
+      <span>
+        <a href="/metrics" target="_blank" class="text-decoration-none">
+          <i class="bi bi-graph-up me-1"></i>Prometheus metrics
+        </a>
+        <span class="mx-2">·</span>
+        <a href="/docs" target="_blank" class="text-decoration-none">
+          <i class="bi bi-book me-1"></i>API docs
+        </a>
+      </span>
+    </footer>
   </div><!-- /main -->
 </div><!-- /flex -->
 
+<!-- ── Toast container (populated at runtime) ─────────────────────────── -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer" style="z-index:1100"></div>
+
 <!-- ── Progress modal ───────────────────────────────────────────────────── -->
 <div class="modal fade" id="progressModal" tabindex="-1">
-  <div class="modal-dialog modal-xl modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header py-2">
+  <div class="modal-dialog modal-xl" style="height:85vh;margin-top:7.5vh;margin-bottom:7.5vh">
+    <div class="modal-content h-100 d-flex flex-column">
+      <div class="modal-header py-2 flex-shrink-0">
         <h6 class="modal-title mb-0" id="progressTitle">Job Progress</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body p-0">
+      <!-- flex-grow-1 + overflow-hidden lets the pre scroll independently -->
+      <div class="modal-body p-0 d-flex flex-column flex-grow-1 overflow-hidden">
         <pre id="progressLog" class="bg-dark text-success p-3 mb-0"></pre>
       </div>
-      <div class="modal-footer py-2">
+      <div class="modal-footer py-2 flex-shrink-0">
         <div id="progressStatus" class="me-auto small"></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                onclick="toggleLogWrap()"><i class="bi bi-text-wrap me-1"></i>Wrap</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                onclick="scrollLogToBottom()"><i class="bi bi-chevron-double-down me-1"></i>Bottom</button>
         <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Close</button>
       </div>
     </div>

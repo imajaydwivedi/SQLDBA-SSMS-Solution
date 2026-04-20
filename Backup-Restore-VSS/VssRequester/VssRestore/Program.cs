@@ -120,6 +120,11 @@ internal static class Program
             {
                 foreach (var c in w.Components)
                 {
+                    if (opts.Databases.Count > 0 && !opts.Databases.Contains(c.ComponentName))
+                    {
+                        Log($"  SKIP {c.ComponentName} - not in --databases list");
+                        continue;
+                    }
                     var meta = sourceSql.Components.FirstOrDefault(
                         m => string.Equals(m.ComponentName, c.ComponentName, StringComparison.OrdinalIgnoreCase)
                           && string.Equals(
@@ -343,7 +348,8 @@ internal static class Program
         IReadOnlyDictionary<string, string> Rename,
         IReadOnlyDictionary<string, string> MoveData,
         IReadOnlyDictionary<string, string> MoveLog,
-        IReadOnlySet<string> AttachOnly);
+        IReadOnlySet<string> AttachOnly,
+        IReadOnlySet<string> Databases);
 
     private static Options ParseArgs(string[] args)
     {
@@ -351,7 +357,7 @@ internal static class Program
         string? srcInst = null;
         string? tgtInst = null;
         int? parallel = null;
-        string? rename = null, moveData = null, moveLog = null, attachOnly = null;
+        string? rename = null, moveData = null, moveLog = null, attachOnly = null, databases = null;
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -364,6 +370,7 @@ internal static class Program
                 case "--move-data":        moveData   = args[++i]; break;
                 case "--move-log":         moveLog    = args[++i]; break;
                 case "--attach-only":      attachOnly = args[++i]; break;
+                case "--databases":        databases  = args[++i]; break;
                 default: throw new ArgumentException($"Unknown arg: {args[i]}");
             }
         }
@@ -372,10 +379,10 @@ internal static class Program
                 "Usage: VssRestore --input <share-path> [--source-instance <name>] "
               + "[--target-instance <name>] [--parallel N] "
               + "[--rename Orig=New,...] [--move-data Db=Dir,...] [--move-log Db=Dir,...] "
-              + "[--attach-only Db1,Db2,...]");
+              + "[--attach-only Db1,Db2,...] [--databases Db1,Db2,...]");
         return new Options(input, srcInst, tgtInst, parallel ?? 0,
             ParseMap(rename), ParseMap(moveData), ParseMap(moveLog),
-            ParseSet(attachOnly));
+            ParseSet(attachOnly), ParseSet(databases));
     }
 
     // Parse "a,b,c" into a case-insensitive set. Empty entries are skipped.

@@ -4,6 +4,12 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>VssBackup</AssemblyName>
     <RootNamespace>VssRequester.Backup</RootNamespace>
+    <!-- Always produce a self-contained win-x64 bundle.
+         No .NET runtime installation required on the target SQL Server VM. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishReadyToRun>false</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

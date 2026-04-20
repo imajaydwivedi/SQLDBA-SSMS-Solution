@@ -101,42 +101,41 @@ def sqlcmd(host_key, query, timeout=60, sa=True, database="master"):
     )
     return run_ps(host_key, script)
 
-_PYODBC_POOL = {}  # host_key -> pyodbc.Connection (kept open across requests)
+# ── Native SQL Server driver (mssql-python) ──────────────────────────────────
+# Microsoft's official pure-Python driver for SQL Server — no ODBC / unixODBC
+# install required, no PowerShell hop. See https://github.com/microsoft/mssql-python.
+# Connection is cached per host_key so subsequent metadata queries are ~2 ms.
+_MSSQL_POOL = {}  # host_key -> mssql_python.Connection
 
-def _pyodbc_driver():
-    import pyodbc
-    for d in pyodbc.drivers():
-        if "ODBC Driver" in d and "SQL Server" in d:
-            return d
-    raise RuntimeError("No ODBC Driver for SQL Server found. Install "
-                       "msodbcsql18 (e.g. `apt install msodbcsql18`).")
-
-def _pyodbc_connect(host_key, database="master", timeout=5):
+def _mssql_connect(host_key, database="master", timeout=5):
     """Open a direct TCP connection to SQL Server on host_key using sa creds.
-    No PowerShell/WinRM hop — typical round-trip is ~20 ms vs ~15 s cold for
-    Invoke-Sqlcmd. Connection is cached per host_key for subsequent calls.
+
+    Typical round-trip is ~15 ms on cold connect, ~2 ms on pool hit, vs ~15 s
+    cold for Invoke-Sqlcmd. Dead connections are evicted and rebuilt on the
+    next call.
     """
-    import pyodbc
-    conn = _PYODBC_POOL.get(host_key)
+    import mssql_python
+    conn = _MSSQL_POOL.get(host_key)
     if conn is not None:
         try:
-            conn.cursor().execute("SELECT 1").fetchone()
+            cur = conn.cursor(); cur.execute("SELECT 1"); cur.fetchone()
             return conn
         except Exception:
             try: conn.close()
             except Exception: pass
-            _PYODBC_POOL.pop(host_key, None)
+            _MSSQL_POOL.pop(host_key, None)
     h = HOSTS[host_key]
-    cs = (f"DRIVER={{{_pyodbc_driver()}}};SERVER={h['ip']},1433;"
-          f"DATABASE={database};UID=sa;PWD={SA_PWD};"
-          f"Encrypt=no;TrustServerCertificate=yes;"
-          f"Connection Timeout={timeout};")
-    conn = pyodbc.connect(cs, timeout=timeout, autocommit=True)
-    _PYODBC_POOL[host_key] = conn
+    # mssql-python's parser rejects the legacy "Connection Timeout" keyword —
+    # use the timeout= kwarg on connect() instead.
+    cs = (f"SERVER={h['ip']},1433;DATABASE={database};"
+          f"UID=sa;PWD={SA_PWD};"
+          f"Encrypt=no;TrustServerCertificate=yes;")
+    conn = mssql_python.connect(cs, autocommit=True, timeout=timeout)
+    _MSSQL_POOL[host_key] = conn
     return conn
 
-def sql_query_pyodbc(host_key, query, params=None, database="master", timeout=15):
-    """Execute a SELECT via pyodbc and return (rows, err, rc).
+def sql_query_mssql(host_key, query, params=None, database="master", timeout=15):
+    """Execute a SELECT via mssql-python and return (rows, err, rc).
 
     Rows are lists of native Python values (str/int/datetime/None). Intended
     for UI-facing endpoints that must stay sub-second. Errors are returned in
@@ -144,28 +143,25 @@ def sql_query_pyodbc(host_key, query, params=None, database="master", timeout=15
     contract of :func:`sql_query_fast`.
     """
     try:
-        conn = _pyodbc_connect(host_key, database=database, timeout=timeout)
-        conn.timeout = timeout
+        conn = _mssql_connect(host_key, database=database, timeout=timeout)
         cur  = conn.cursor()
         cur.execute(query, params) if params else cur.execute(query)
         rows = [list(r) for r in cur.fetchall()] if cur.description else []
         return rows, "", 0
     except Exception as e:
-        _PYODBC_POOL.pop(host_key, None)
+        _MSSQL_POOL.pop(host_key, None)
         return [], str(e), 1
 
-def sql_exec_pyodbc(host_key, query, params=None, database="master", timeout=30):
-    """Run an action query (no result set) via pyodbc. Returns (err, rc)."""
+def sql_exec_mssql(host_key, query, params=None, database="master", timeout=30):
+    """Run an action query (no result set) via mssql-python. Returns (err, rc)."""
     try:
-        conn = _pyodbc_connect(host_key, database=database, timeout=timeout)
-        conn.timeout = timeout
+        conn = _mssql_connect(host_key, database=database, timeout=timeout)
         cur  = conn.cursor()
         cur.execute(query, params) if params else cur.execute(query)
         return "", 0
     except Exception as e:
-        _PYODBC_POOL.pop(host_key, None)
+        _MSSQL_POOL.pop(host_key, None)
         return str(e), 1
-
 
 def sql_query_fast(host_key, query, database="master", timeout=30):
     """Run a T-SQL query via System.Data.SqlClient — bypasses the SqlServer

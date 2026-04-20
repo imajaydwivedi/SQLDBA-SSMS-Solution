@@ -24,10 +24,21 @@ async function loadServers() {
   renderSidebar();
   populateDropdowns();
   // Auto-populate the Backup tab's DB list for the pre-selected source.
-  // /api/databases is now pyodbc-direct (~20 ms) so this does not delay
-  // page render noticeably.
+  // /api/databases is now mssql-python direct (~15 ms cold, ~2 ms pool hit)
+  // so this does not delay page render noticeably.
   const bkp = document.getElementById("bkpSource");
   if (bkp && bkp.value) loadDatabases("bkpSource", "bkpDbList");
+  updateFooter();
+  // Load snapshot cache + jobs count in background so the footer is accurate
+  // from the first render, without blocking the initial Backup tab.
+  fetch("/api/snapshots").then(r => r.json()).then(j => {
+    _snapshotCache = j || [];
+    updateFooter();
+  }).catch(() => {});
+  fetch("/api/jobs").then(r => r.json()).then(js => {
+    const f = document.getElementById("footJobs");
+    if (f && Array.isArray(js)) f.textContent = js.length;
+  }).catch(() => {});
 }
 
 function renderSidebar() {
@@ -254,7 +265,7 @@ async function refreshRestoreConflicts() {
 // ── Backup ────────────────────────────────────────────────────────────────────
 async function startBackup() {
   const dbs = getCheckedDbs("bkpDbList");
-  if (!dbs.length) { alert("Select at least one database."); return; }
+  if (!dbs.length) { toast("Select at least one database.", "warning"); return; }
   const body = {
     label:     document.getElementById("bkpLabel").value || "gui_backup",
     source:    document.getElementById("bkpSource").value,
@@ -264,10 +275,18 @@ async function startBackup() {
     with_tlog: document.getElementById("bkpTlog").checked,
     copy_only: document.getElementById("bkpCopyOnly").checked,
   };
-  const r = await fetch("/api/jobs/backup", { method: "POST",
-    headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
-  const j = await r.json();
-  openProgress(j.job_id, `Backup: ${body.label}`);
+  if (!confirm(`Start backup of ${dbs.length} database(s) on ${body.source}?\n\n  • ${dbs.join("\n  • ")}`))
+    return;
+  try {
+    const r = await fetch("/api/jobs/backup", { method: "POST",
+      headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(await r.text());
+    const j = await r.json();
+    toast(`Backup job ${j.job_id} started (${dbs.length} DB)`, "success");
+    openProgress(j.job_id, `Backup: ${body.label}`);
+  } catch (e) {
+    toast(`Backup failed to start: ${e.message}`, "danger");
+  }
 }
 
 // ── Restore ───────────────────────────────────────────────────────────────────
@@ -319,41 +338,304 @@ async function startRestore() {
     with_tlog: withTlog,
     pitr:      pitrRaw ? pitrRaw.replace("T"," ") : null,
   };
-  const r = await fetch("/api/jobs/restore", { method: "POST",
-    headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
-  const j = await r.json();
-  openProgress(j.job_id, `Restore: ${snap}`);
+  try {
+    const r = await fetch("/api/jobs/restore", { method: "POST",
+      headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(await r.text());
+    const j = await r.json();
+    toast(`Restore job ${j.job_id} started on ${target}`, "success");
+    openProgress(j.job_id, `Restore: ${snap}`);
+  } catch (e) {
+    toast(`Restore failed to start: ${e.message}`, "danger");
+  }
 }
 
 // ── Jobs table ────────────────────────────────────────────────────────────────
+let _jobsCache     = [];
+let _jobsSorts     = [{ col: 'started_at', asc: false }];
+let _jobsPage      = 1;
+let _jobsPageSize  = 25;          // 0 = show all
+let _jobsTimeRange = '24h';       // matches the <select> default
+
 async function loadJobs() {
-  const r    = await fetch("/api/jobs");
-  const jobs = await r.json();
-  const el   = document.getElementById("jobsTable");
-  if (!jobs.length) { el.innerHTML = '<p class="text-muted">No jobs yet.</p>'; return; }
-  const rows = jobs.map(j => `
+  try {
+    const r    = await fetch("/api/jobs");
+    _jobsCache = await r.json();
+    renderJobsTable();
+  } catch (e) {
+    const el = document.getElementById("jobsTable");
+    if (el) el.innerHTML = `<tr><td colspan="7" class="text-danger">Failed to load jobs: ${e.message}</td></tr>`;
+  }
+}
+
+function sortJobs(col, multi = false) {
+  const existingIdx = _jobsSorts.findIndex(s => s.col === col);
+
+  if (multi) {
+    if (existingIdx >= 0) {
+      if (_jobsSorts[existingIdx].asc) {
+        _jobsSorts[existingIdx].asc = false;
+      } else {
+        _jobsSorts.splice(existingIdx, 1);
+      }
+    } else {
+      _jobsSorts.push({ col, asc: true });
+    }
+  } else {
+    if (existingIdx === 0 && _jobsSorts.length === 1) {
+      if (_jobsSorts[0].asc) {
+        _jobsSorts[0].asc = false;
+      } else {
+        _jobsSorts = [];
+      }
+    } else {
+      _jobsSorts = [{ col, asc: true }];
+    }
+  }
+  updateSortIcons();
+  renderJobsTable();
+}
+
+function updateSortIcons() {
+  const headers = document.querySelectorAll('#tabJobs th[onclick]');
+  headers.forEach(th => {
+    const colMatch = th.getAttribute('onclick').match(/'([^']+)'/);
+    if (!colMatch) return;
+    const col = colMatch[1];
+    let icon = th.querySelector('i');
+    if (!icon) {
+      icon = document.createElement('i');
+      th.appendChild(icon);
+    }
+
+    const sort = _jobsSorts.find(s => s.col === col);
+    if (sort) {
+      const idx = _jobsSorts.indexOf(sort);
+      icon.className = sort.asc ? 'bi bi-sort-down-alt ms-1 text-primary' : 'bi bi-sort-down ms-1 text-primary';
+      icon.style.fontSize = '1em';
+      icon.style.opacity = '1.0';
+      // Add a small badge if there are multiple sorts
+      const existingBadge = th.querySelector('.sort-badge');
+      if (existingBadge) existingBadge.remove();
+      if (_jobsSorts.length > 1) {
+         const badge = document.createElement('span');
+         badge.className = 'sort-badge';
+         badge.textContent = idx + 1;
+         th.appendChild(badge);
+      }
+    } else {
+      icon.className = 'bi bi-arrow-down-up ms-1 text-muted';
+      icon.style.fontSize = '0.8em';
+      icon.style.opacity = '0.4';
+      const existingBadge = th.querySelector('.sort-badge');
+      if (existingBadge) existingBadge.remove();
+    }
+  });
+}
+
+function parsePrometheusFilter(q) {
+  // Supports key:"value", key:'value', key:value
+  // Also supports inequality for times, e.g. Started:">24h ago"
+  const filters = [];
+  // Basic regex to match key:value pairs
+  const regex = /([a-zA-Z0-9_]+)\s*:\s*(?:"([^"]+)"|'([^']+)'|([<>]=?\s*\d+(?:\.\d+)?\s*[smhd](?:\s*ago)?|[^\s]+))/gi;
+  let match;
+
+  while ((match = regex.exec(q)) !== null) {
+    const key = match[1].toLowerCase();
+    let val = match[2] || match[3] || match[4] || "";
+    // Some values might come with quotes from match[2] or match[3]
+    // The regex already handled it, so we're good.
+    filters.push({ key, val, text: match[0] });
+  }
+
+  // Anything not captured by the regex is generic search text
+  let genericText = q.replace(regex, '').trim().toLowerCase();
+
+  return { filters, genericText };
+}
+
+function checkTimeInequality(jobTimeStr, queryVal) {
+  if (!jobTimeStr || !queryVal) return false;
+
+  // if queryVal is simple ">24h ago" with no quotes, or if it had quotes and was parsed as `>24h ago`
+  // We'll strip surrounding quotes if any just in case
+  queryVal = queryVal.replace(/^['"]|['"]$/g, '').trim();
+
+  const jobTime = new Date(jobTimeStr).getTime();
+
+  // Try to parse exact relative time query: >, <, >=, <= followed by amount and unit (s, m, h, d) + optional "ago"
+  const timeRegex = /^([<>]=?)\s*(\d+(?:\.\d+)?)\s*([smhd])(?:\s*ago)?$/i;
+  const match = timeRegex.exec(queryVal);
+  if (match) {
+    const op = match[1];
+    const amount = parseFloat(match[2]);
+    const unit = match[3].toLowerCase();
+
+    let ms = 0;
+    if (unit === 's') ms = amount * 1000;
+    else if (unit === 'm') ms = amount * 60 * 1000;
+    else if (unit === 'h') ms = amount * 60 * 60 * 1000;
+    else if (unit === 'd') ms = amount * 24 * 60 * 60 * 1000;
+
+    const targetTime = Date.now() - ms;
+
+    if (op === '>') return jobTime < targetTime;
+    if (op === '>=') return jobTime <= targetTime;
+    if (op === '<') return jobTime > targetTime;
+    if (op === '<=') return jobTime >= targetTime;
+
+    return false;
+  }
+
+  // Try parsing absolute ISO timestamp (for simple equals)
+  const absTime = new Date(queryVal).getTime();
+  if (!isNaN(absTime) && queryVal.length >= 8) { // simple heuristic to not match single numbers as dates
+      return jobTimeStr.startsWith(queryVal) || jobTime === absTime;
+  }
+
+  // Otherwise try basic text inclusion
+  return jobTimeStr.toLowerCase().includes(queryVal.toLowerCase());
+}
+
+/** Return the cutoff timestamp (ms) for the active time-range filter, or 0 for "all". */
+function _jobsTimeCutoff() {
+  const map = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000 };
+  const secs = map[_jobsTimeRange] || 0;
+  return secs ? Date.now() - secs * 1000 : 0;
+}
+
+function renderJobsTable() {
+  const el = document.getElementById("jobsTable");
+  const footEl = document.getElementById("footJobs");
+  if (footEl && Array.isArray(_jobsCache)) footEl.textContent = _jobsCache.length;
+  if (!el) return;
+
+  // ── 1. Time-range filter ────────────────────────────────────────────────
+  const cutoff = _jobsTimeCutoff();
+  let jobs = cutoff
+    ? _jobsCache.filter(j => {
+        const t = j.started_at ? new Date(j.started_at).getTime() : 0;
+        return t >= cutoff;
+      })
+    : _jobsCache.slice();
+
+  // ── 2. Prometheus-style text / key:value filter ─────────────────────────
+  const q = (document.getElementById("jobFilter")?.value || "").trim();
+  if (q) {
+    const pf = parsePrometheusFilter(q);
+    jobs = jobs.filter(j => {
+      if (pf.genericText) {
+        const gt = pf.genericText;
+        if (!((j.id||"").toLowerCase().includes(gt) ||
+              (j.type||"").toLowerCase().includes(gt) ||
+              (j.label||"").toLowerCase().includes(gt) ||
+              (j.status||"").toLowerCase().includes(gt))) return false;
+      }
+      for (const f of pf.filters) {
+        const key = f.key.toLowerCase();
+        const val = f.val.toLowerCase();
+        if (key === 'status'  && (j.status||"").toLowerCase() !== val) return false;
+        if (key === 'type'    && (j.type||"").toLowerCase() !== val) return false;
+        if (key === 'label'   && !(j.label||"").toLowerCase().includes(val)) return false;
+        if (key === 'id'      && !(j.id||"").toLowerCase().includes(val)) return false;
+        if ((key === 'started' || key === 'started_at') &&
+            !checkTimeInequality(j.started_at, f.text.substring(f.text.indexOf(':')+1))) return false;
+        if ((key === 'finished' || key === 'finished_at') &&
+            !checkTimeInequality(j.finished_at, f.text.substring(f.text.indexOf(':')+1))) return false;
+      }
+      return true;
+    });
+  }
+
+  // ── 3. Sort ─────────────────────────────────────────────────────────────
+  jobs.sort((a, b) => {
+    for (const sort of _jobsSorts) {
+      let vA = a[sort.col] || "", vB = b[sort.col] || "";
+      if (sort.col === 'started_at' || sort.col === 'finished_at') {
+        const tA = vA ? new Date(vA).getTime() : 0;
+        const tB = vB ? new Date(vB).getTime() : 0;
+        if (tA !== tB) return sort.asc ? tA - tB : tB - tA;
+      } else {
+        if (typeof vA === "string") vA = vA.toLowerCase();
+        if (typeof vB === "string") vB = vB.toLowerCase();
+        if (vA < vB) return sort.asc ? -1 : 1;
+        if (vA > vB) return sort.asc ? 1 : -1;
+      }
+    }
+    return 0;
+  });
+
+  const total = jobs.length;
+
+  // ── 4. Pagination ────────────────────────────────────────────────────────
+  const ps = _jobsPageSize;          // 0 = show all
+  const pages = ps ? Math.max(1, Math.ceil(total / ps)) : 1;
+  if (_jobsPage > pages) _jobsPage = pages;
+  if (_jobsPage < 1)     _jobsPage = 1;
+
+  const slice = ps ? jobs.slice((_jobsPage - 1) * ps, _jobsPage * ps) : jobs;
+
+  // pagination controls
+  const infoEl    = document.getElementById("jobsPaginationInfo");
+  const pageNumEl = document.getElementById("jobsPageNum");
+  const prevBtn   = document.getElementById("jobsPrevBtn");
+  const nextBtn   = document.getElementById("jobsNextBtn");
+  const ctrlEl    = document.getElementById("jobsPaginationCtrl");
+
+  if (infoEl) {
+    const from = total ? (ps ? (_jobsPage - 1) * ps + 1 : 1) : 0;
+    const to   = ps ? Math.min(_jobsPage * ps, total) : total;
+    infoEl.textContent = total
+      ? `Showing ${from}–${to} of ${total} job(s)`
+      : "No jobs match the current filters.";
+  }
+  if (pageNumEl) pageNumEl.textContent = ps && pages > 1 ? `Page ${_jobsPage} / ${pages}` : "";
+  if (prevBtn)   prevBtn.disabled  = _jobsPage <= 1;
+  if (nextBtn)   nextBtn.disabled  = _jobsPage >= pages;
+  if (ctrlEl)    ctrlEl.style.display = ps && pages > 1 ? "" : "none";
+
+  // ── 5. Render rows ───────────────────────────────────────────────────────
+  if (!slice.length) {
+    el.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-3">No jobs found.</td></tr>';
+    updateSortIcons();
+    return;
+  }
+
+  el.innerHTML = slice.map(j => `
     <tr>
       <td><code class="small">${j.id}</code></td>
       <td><span class="badge ${j.type==="backup"?"bg-primary":"bg-success"}">${j.type}</span></td>
       <td class="small">${j.label}</td>
       <td><span class="badge ${statusBadge(j.status)}">${j.status}</span></td>
-      <td class="small text-muted">${(j.started_at||"—").replace("T"," ")}</td>
-      <td class="small text-muted">${(j.finished_at||"—").replace("T"," ")}</td>
-      <td>
+      <td class="small text-muted">${(j.started_at||"—").replace("T"," ").substring(0,19)}</td>
+      <td class="small text-muted">${(j.finished_at||"—").replace("T"," ").substring(0,19)}</td>
+      <td class="text-end">
         <button class="btn btn-sm btn-outline-secondary py-0"
                 onclick="openProgress('${j.id}','${j.label.replace(/'/g,"\\'")}')">
           <i class="bi bi-terminal"></i>
         </button>
       </td>
     </tr>`).join("");
-  el.innerHTML = `
-    <table class="table table-sm table-hover align-middle">
-      <thead class="table-light"><tr>
-        <th>ID</th><th>Type</th><th>Label</th><th>Status</th>
-        <th>Started</th><th>Finished</th><th></th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+
+  updateSortIcons();
+}
+
+function setJobsTimeFilter(val) {
+  _jobsTimeRange = val;
+  _jobsPage = 1;
+  renderJobsTable();
+}
+
+function setJobsPage(n) {
+  _jobsPage = n;
+  renderJobsTable();
+}
+
+function setJobsPageSize(n) {
+  _jobsPageSize = n;
+  _jobsPage = 1;
+  renderJobsTable();
 }
 
 function statusBadge(s) {
@@ -369,6 +651,20 @@ async function refreshRunningBadge() {
     document.getElementById("runningCount").textContent = n;
     badge.classList.toggle("d-none", n === 0);
   } catch {}
+}
+
+function scrollLogToBottom() {
+  const log = document.getElementById("progressLog");
+  if (log) log.scrollTop = log.scrollHeight;
+}
+
+function toggleLogWrap() {
+  const log = document.getElementById("progressLog");
+  if (!log) return;
+  const nowWrap = log.style.whiteSpace !== "nowrap";
+  log.style.whiteSpace = nowWrap ? "nowrap" : "pre-wrap";
+  log.style.wordBreak  = nowWrap ? "normal" : "break-all";
+  log.style.overflowX  = nowWrap ? "auto"   : "hidden";
 }
 
 // ── Progress WebSocket modal ───────────────────────────────────────────────────
@@ -424,23 +720,41 @@ function openProgress(jobId, title) {
 // list, plus per-row details/delete and a "Delete all" button. All endpoints
 // read from /api/snapshots (see server.py).
 let _snapshotDetailModal = null;
+let _snapshotCache = [];  // last /api/snapshots response; used for client filter
 
 async function loadSnapshotsPage() {
   const tbody = document.getElementById("snapshotsTable");
-  const sum   = document.getElementById("snapSummary");
-  tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">Loading…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-3">Loading…</td></tr>';
   try {
     const r = await fetch("/api/snapshots");
-    const snaps = await r.json();
-    if (!snaps.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">No snapshots found.</td></tr>';
-      if (sum) sum.textContent = "";
-      return;
-    }
-    const total = snaps.reduce((a, s) => a + (s.size_bytes || 0), 0);
-    if (sum) sum.textContent = `(${snaps.length} snapshot${snaps.length===1?"":"s"}, ${humanSize(total)} total)`;
+    _snapshotCache = await r.json();
+    renderSnapshotsTable();
+    updateFooter();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-danger">${e.message}</td></tr>`;
+  }
+}
+
+function renderSnapshotsTable() {
+  const tbody = document.getElementById("snapshotsTable");
+  const sum   = document.getElementById("snapSummary");
+  const filterEl = document.getElementById("snapFilter");
+  const q = (filterEl ? filterEl.value : "").toLowerCase().trim();
+  const snaps = _snapshotCache.filter(s =>
+    !q ||
+    s.name.toLowerCase().includes(q) ||
+    (s.databases || []).some(d => d.toLowerCase().includes(q)));
+  if (!_snapshotCache.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-3">No snapshots found.</td></tr>';
+    if (sum) sum.textContent = "";
+    return;
+  }
+  if (!snaps.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-muted text-center py-3">No snapshots match <code>${q}</code>.</td></tr>`;
+  } else {
     tbody.innerHTML = snaps.map(s => `
       <tr>
+        <td><input class="form-check-input snap-chk" type="checkbox" value="${s.name.replace(/"/g, '&quot;')}" onchange="updateDeleteSelectedButton()"></td>
         <td><i class="bi bi-hdd text-info"></i></td>
         <td class="font-monospace" style="font-size:12px">${s.name}</td>
         <td style="white-space:nowrap">${s.created_at}</td>
@@ -457,9 +771,42 @@ async function loadSnapshotsPage() {
           </button>
         </td>
       </tr>`).join("");
-  } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-danger">${e.message}</td></tr>`;
   }
+  const chkAll = document.getElementById("chkAllSnapshots");
+  if (chkAll) chkAll.checked = false;
+  updateDeleteSelectedButton();
+  const total = _snapshotCache.reduce((a, s) => a + (s.size_bytes || 0), 0);
+  if (sum) sum.textContent = `(${_snapshotCache.length} snapshot${_snapshotCache.length===1?"":"s"}, ${humanSize(total)} total` +
+    (q ? `; ${snaps.length} match '${q}'` : ``) + `)`;
+}
+
+function toggleAllSnapshots(checked) {
+  document.querySelectorAll(".snap-chk").forEach(chk => chk.checked = checked);
+  updateDeleteSelectedButton();
+}
+
+function updateDeleteSelectedButton() {
+  const btn = document.getElementById("btnDeleteSelectedSnapshots");
+  if (!btn) return;
+  const anyChecked = document.querySelectorAll(".snap-chk:checked").length > 0;
+  btn.style.display = anyChecked ? "inline-block" : "none";
+}
+
+async function deleteSelectedSnapshots() {
+  const selected = Array.from(document.querySelectorAll(".snap-chk:checked")).map(chk => chk.value);
+  if (!selected.length) return;
+  if (!confirm(`Delete ${selected.length} selected snapshot(s)?\n\nThis permanently removes the folders and their files from the transport share.`)) return;
+
+  for (const name of selected) {
+    try {
+      const r = await fetch(`/api/snapshots/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (!r.ok) throw new Error(await r.text());
+    } catch (e) {
+      alert(`Delete failed for ${name}: ${e.message}`);
+    }
+  }
+  loadSnapshotsPage();
+  loadSnapshots();
 }
 
 function humanSize(n) {
@@ -525,4 +872,45 @@ async function deleteAllSnapshots() {
   } catch (e) {
     alert(`Delete-all failed: ${e.message}`);
   }
+}
+
+
+// ── Toasts + footer ──────────────────────────────────────────────────────────
+// Bootstrap toast popup — called from startBackup/startRestore and delete ops
+// so users always get confirmation that the click registered. Auto-hides after
+// 5 s; stays on screen long enough to read but not long enough to stack.
+function toast(message, variant = "primary") {
+  const container = document.getElementById("toastContainer");
+  if (!container) { alert(message); return; }
+  const id = "toast_" + Date.now() + "_" + Math.random().toString(36).slice(2,6);
+  const icon = ({
+    success: "bi-check-circle",
+    danger:  "bi-exclamation-triangle",
+    warning: "bi-exclamation-triangle",
+    primary: "bi-info-circle",
+  })[variant] || "bi-info-circle";
+  const html = `
+    <div class="toast align-items-center text-bg-${variant} border-0 show" role="alert"
+         id="${id}" data-bs-delay="5000">
+      <div class="d-flex">
+        <div class="toast-body"><i class="bi ${icon} me-2"></i>${message}</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                data-bs-dismiss="toast"></button>
+      </div>
+    </div>`;
+  container.insertAdjacentHTML("beforeend", html);
+  const el = document.getElementById(id);
+  const t = new bootstrap.Toast(el, { delay: 5000 });
+  t.show();
+  el.addEventListener("hidden.bs.toast", () => el.remove());
+}
+
+// Footer counters: servers + snapshots + jobs. Called from loadServers,
+// loadSnapshotsPage, loadJobs — keeps the footer in sync with whatever view
+// is currently open without firing extra requests of its own.
+function updateFooter() {
+  const s = document.getElementById("footServers");
+  const p = document.getElementById("footSnaps");
+  if (s && typeof _servers !== "undefined" && _servers) s.textContent = _servers.length;
+  if (p) p.textContent = (_snapshotCache || []).length;
 }

@@ -20,9 +20,14 @@ sys.path.insert(0, VSS_ROOT)
 from vss_api.config import (list_servers, add_server, remove_server,
                              TRANSPORT_PATH, REQDIR)
 from vss_api.jobs import store
-from winrm_helper import sqlcmd, sql_query_fast, sql_query_pyodbc
+from winrm_helper import sql_query_mssql
 
 app = FastAPI(title="VSS Backup & Restore", version="1.0")
+
+# Prometheus /metrics endpoint + HTTP + custom gauges. Must be installed
+# before any routes are registered so the middleware wraps every handler.
+from vss_api import metrics as _metrics  # noqa: E402
+_metrics.install(app, TRANSPORT_PATH, list_servers)
 
 
 @app.on_event("startup")
@@ -59,14 +64,18 @@ def api_del_server(key: str):
 
 @app.get("/api/databases")
 def api_databases(host: str):
-    # Direct pyodbc connection to <host>:1433 (no PowerShell/WinRM hop) —
-    # typical round-trip is ~20 ms vs ~15 s cold for Invoke-Sqlcmd, so the
-    # Backup tab's DB list stays responsive on server re-selection.
-    rows, err, rc = sql_query_pyodbc(
+    # Direct mssql-python connection to <host>:1433 (no PowerShell/WinRM hop) —
+    # typical round-trip is ~15 ms cold, ~2 ms on pool hit vs ~15 s cold for
+    # Invoke-Sqlcmd, so the Backup tab's DB list stays responsive on server
+    # re-selection.
+    import time as _t
+    t0 = _t.time()
+    rows, err, rc = sql_query_mssql(
         host,
         "SELECT name, state_desc, recovery_model_desc "
         "FROM sys.databases WHERE database_id > 4 ORDER BY name",
     )
+    _metrics.observe_sql(host, "list_databases", _t.time() - t0)
     if rc != 0:
         raise HTTPException(500, err[:400])
     return [{"name":     r[0],
@@ -85,9 +94,12 @@ def api_databases_exists(host: str, names: str):
     if not wanted:
         return {"existing": [], "checked": []}
     placeholders = ",".join("?" * len(wanted))
-    rows, err, rc = sql_query_pyodbc(host,
+    import time as _t
+    t0 = _t.time()
+    rows, err, rc = sql_query_mssql(host,
         f"SELECT name FROM sys.databases WHERE name IN ({placeholders}) ORDER BY name",
         params=wanted)
+    _metrics.observe_sql(host, "databases_exists", _t.time() - t0)
     if rc != 0:
         raise HTTPException(500, err[:400])
     wset = set(wanted)

@@ -34,7 +34,7 @@ HERE     = os.path.dirname(os.path.abspath(__file__))
 VSS_ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, VSS_ROOT)
 
-from winrm_helper import run_ps, sqlcmd, load_config
+from winrm_helper import run_ps, sql_query_mssql, sql_exec_mssql, load_config
 
 _cfg      = load_config()
 SHARE_UNC = _cfg.get("SHARE_UNC", r"\\192.168.122.1\vss-transport")
@@ -135,13 +135,12 @@ names_to_clear = sorted({*(d for d in dbs if d not in sidebyside),
 if sidebyside:
     print(f"[restore] side-by-side DBs (originals preserved): {sorted(sidebyside)}")
 qlist = ",".join(f"'{d}'" for d in names_to_clear)
-out, err, rc = sqlcmd(args.target,
+rows, err, rc = sql_query_mssql(args.target,
     f"SELECT name FROM sys.databases WHERE name IN ({qlist}) ORDER BY name")
-existing = [l.strip() for l in out.splitlines()
-            if l.strip() and l.strip() not in ("name", "----")
-            and not set(l.strip()) <= {"-"}]
-# Best-effort filter of Format-Table artefacts (dashes/headers already excluded above).
-existing = [n for n in existing if n in names_to_clear]
+if rc != 0:
+    print(f"[restore] ERROR: could not read sys.databases on {args.target}: {err[:400]}")
+    sys.exit(1)
+existing = [r[0] for r in rows if r[0] in names_to_clear]
 if existing:
     print(f"[restore] Pre-flight: these names already exist on {args.target}: {existing}")
     if not args.overwrite:
@@ -151,18 +150,46 @@ if existing:
     print(f"[restore] --overwrite set; will drop conflicting DBs.")
 
 # ── Drop DBs that would conflict (originals + rename targets) ─────────────────
+# Direct mssql-python call — no PowerShell/Invoke-Sqlcmd hop.
 for name in names_to_clear:
-    print(f"[restore] Dropping {name} on {args.target} if present ...")
-    run_ps(args.target, textwrap.dedent(f"""
-        $db='{name}'
-        Invoke-Sqlcmd -ServerInstance '.' -Database 'master' -Query @"
-        IF DB_ID('$db') IS NOT NULL BEGIN
-            DECLARE @s SYSNAME = (SELECT state_desc FROM sys.databases WHERE name='$db');
-            IF @s=N'ONLINE' ALTER DATABASE [$db] SET OFFLINE WITH ROLLBACK IMMEDIATE;
-            DROP DATABASE [$db];
-        END
-"@
-    """))
+    if name not in existing:
+        continue                          # nothing to drop
+    print(f"[restore] Dropping {name} on {args.target} ...")
+    err, rc = sql_exec_mssql(args.target,
+        f"IF DB_ID('{name}') IS NOT NULL BEGIN "
+        f"  IF (SELECT state_desc FROM sys.databases WHERE name='{name}')=N'ONLINE' "
+        f"    ALTER DATABASE [{name}] SET OFFLINE WITH ROLLBACK IMMEDIATE; "
+        f"  DROP DATABASE [{name}]; "
+        f"END", timeout=180)
+    if rc != 0:
+        print(f"[restore] ERROR: DROP DATABASE [{name}] failed: {err[:400]}")
+        sys.exit(5)
+
+# ── Drop DBs holding same file paths (rename-orphan cleanup) ─────────────────
+# A previous rename-restore (T5) may leave a database like DBA_Copy that still
+# owns DBA.mdf at the original path.  VssRestore would fail to overwrite it.
+# When --overwrite is set, detect any DB whose MDF matches {db}.mdf for any db
+# in our restore list, and drop it even if the name doesn't match.
+if args.overwrite:
+    like_clauses = " OR ".join(
+        f"mf.physical_name LIKE N'%\\{db}.mdf'" for db in dbs)
+    quoted_dbs   = ",".join(f"N'{d}'" for d in dbs)
+    rows_fp, _e_fp, _rc_fp = sql_query_mssql(args.target,
+        f"SELECT DISTINCT d.name FROM sys.databases d "
+        f"JOIN sys.master_files mf ON d.database_id = mf.database_id "
+        f"WHERE ({like_clauses}) AND d.name NOT IN ({quoted_dbs})")
+    for fp_row in (rows_fp or []):
+        fp_name = fp_row[0]
+        print(f"[restore] File-path conflict: dropping [{fp_name}] on {args.target} "
+              f"(holds a .mdf used by one of {dbs})")
+        err_fp, rc_fp = sql_exec_mssql(args.target,
+            f"IF DB_ID(N'{fp_name}') IS NOT NULL BEGIN "
+            f"  IF (SELECT state_desc FROM sys.databases WHERE name=N'{fp_name}')=N'ONLINE' "
+            f"    ALTER DATABASE [{fp_name}] SET OFFLINE WITH ROLLBACK IMMEDIATE; "
+            f"  DROP DATABASE [{fp_name}]; "
+            f"END", timeout=180)
+        if rc_fp != 0:
+            print(f"[restore] WARN: DROP [{fp_name}] failed: {err_fp[:200]}")
 
 # ── VssRestore.exe ────────────────────────────────────────────────────────────
 # Build the arg list for VssRestore.exe. Each token is single-quoted for the
@@ -187,6 +214,8 @@ if move_log:
     extra += ["'--move-log'", f"'{pairs}'"]
 if sidebyside:
     extra += ["'--attach-only'", f"'{','.join(sorted(sidebyside))}'"]
+if dbs:
+    extra += ["'--databases'", f"'{','.join(dbs)}'"]
 extra_s = (", " + ", ".join(extra)) if extra else ""
 
 print(f"[restore] Starting VssRestore.exe ...")
@@ -229,14 +258,15 @@ if rc != 0 or (_vss_ec is not None and _vss_ec != 0):
 # on-target names.
 probe_names = sorted({*dbs, *effective.values()})
 qlist = ",".join(f"'{d}'" for d in probe_names)
-out, _, _ = sqlcmd(args.target,
+rows, _err, _rc = sql_query_mssql(args.target,
     f"SELECT name, state_desc FROM sys.databases WHERE name IN ({qlist}) ORDER BY name")
-print("[restore] Post-restore DB states:"); print(out)
+print("[restore] Post-restore DB states:")
+for r in rows:
+    print(f"  {str(r[0]):<28} {r[1]}")
 
 # Map each selected DB to the actual name it landed under on the target. Prefer
 # the effective (renamed) name if it shows up; fall back to the original.
-state_lines = [l.strip() for l in out.splitlines() if l.strip()]
-state_tokens = {l.split()[0] for l in state_lines if l.split() and l.split()[0] in probe_names}
+state_tokens = {r[0] for r in rows}
 landed: dict[str, str] = {}
 for db in dbs:
     eff = effective[db]
@@ -289,7 +319,7 @@ if sidebyside:
         print(f"[restore] Attaching side-by-side: [{new_name}]")
         for p in filenames:
             print(f"           FILENAME = {p}")
-        o, e, rc4 = sqlcmd(args.target, qry, timeout=600)
+        e, rc4 = sql_exec_mssql(args.target, qry, timeout=600)
         if rc4 != 0:
             print(f"[restore] ERROR: attach failed for {new_name}: {e[:600]}")
             sys.exit(5)
@@ -318,19 +348,31 @@ if args.with_tlog:
             print(f"[restore] ERROR: verify_tlog_chain FAILED for {name}")
             sys.exit(4)
 
-# ── Bring any still-RESTORING rename candidates ONLINE so we can rename ───────
-# If the user skipped with_tlog but asked for a rename AND SetRestoreName was
-# not honored (i.e. DB landed under original), recover under the original name.
-if rename_map and not args.with_tlog:
-    for orig in rename_map:
-        if landed[orig] == effective[orig]:
-            continue              # already renamed by SetRestoreName / attached
-        print(f"[restore] RESTORE DATABASE [{orig}] WITH RECOVERY (pre-rename) ...")
-        o, e, rc2 = sqlcmd(args.target,
-            f"RESTORE DATABASE [{orig}] WITH RECOVERY;", timeout=120)
-        if rc2 != 0:
-            print(f"[restore] ERROR: could not recover {orig} for rename: {e[:400]}")
-            sys.exit(5)
+# ── Finalize recovery: bring every still-RESTORING DB ONLINE ──────────────────
+# VSS PostRestore leaves DBs in RESTORING state. We now finalize:
+#   - side-by-side DBs are already ONLINE via attach fallback → skip
+#   - with_tlog DBs were finalized inside verify_tlog_chain.py → skip
+#   - everything else gets RESTORE DATABASE ... WITH RECOVERY on the landed
+#     name (original if SetRestoreName was not honored, else the renamed name).
+# This covers plain restore, overwrite, move-data / move-log without tlog,
+# and the rename-without-tlog pre-rename recovery step.
+if not args.with_tlog:
+    # Re-query live states so we don't issue RECOVERY against an already-ONLINE DB
+    probe2 = sorted({landed[d] for d in dbs if d not in sidebyside})
+    if probe2:
+        qlist3 = ",".join(f"'{d}'" for d in probe2)
+        rows3, _e3, _rc3 = sql_query_mssql(args.target,
+            f"SELECT name, state_desc FROM sys.databases WHERE name IN ({qlist3})")
+        live = {r[0]: r[1] for r in rows3}
+        for name in probe2:
+            if live.get(name) != "RESTORING":
+                continue
+            print(f"[restore] RESTORE DATABASE [{name}] WITH RECOVERY ...")
+            e, rc2 = sql_exec_mssql(args.target,
+                f"RESTORE DATABASE [{name}] WITH RECOVERY;", timeout=1800)
+            if rc2 != 0:
+                print(f"[restore] ERROR: could not recover {name}: {e[:400]}")
+                sys.exit(5)
 
 # ── Rename fallback (ALTER DATABASE ... MODIFY NAME) ─────────────────────────
 # Only needed when SetRestoreName was not honored (landed==orig != effective).
@@ -340,7 +382,7 @@ if rename_map:
         print(f"[restore] Renaming (fallback) on {args.target}: {pending}")
         for orig, new in pending.items():
             print(f"[restore] ALTER DATABASE [{orig}] MODIFY NAME = [{new}]")
-            o, e, rc3 = sqlcmd(args.target,
+            e, rc3 = sql_exec_mssql(args.target,
                 f"ALTER DATABASE [{orig}] MODIFY NAME = [{new}];", timeout=60)
             if rc3 != 0:
                 print(f"[restore] ERROR: rename {orig} -> {new} failed: {e[:400]}")
@@ -349,8 +391,10 @@ if rename_map:
         print(f"[restore] SetRestoreName already applied on-target; no ALTER needed.")
     # Show the final state using the effective names.
     qlist2 = ",".join(f"'{d}'" for d in effective.values())
-    out, _, _ = sqlcmd(args.target,
+    rows, _err, _rc = sql_query_mssql(args.target,
         f"SELECT name, state_desc FROM sys.databases WHERE name IN ({qlist2}) ORDER BY name")
-    print("[restore] Final DB states after rename:"); print(out)
+    print("[restore] Final DB states after rename:")
+    for r in rows:
+        print(f"  {str(r[0]):<28} {r[1]}")
 
 print("[restore] Complete.")

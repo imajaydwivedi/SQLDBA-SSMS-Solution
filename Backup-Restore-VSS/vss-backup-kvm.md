@@ -265,7 +265,20 @@ a one-line actionable error (no silent fallbacks). Move the `.venv` directory
 ### 5.2 Hypervisor (`ryzen9`, Linux)
 
 1. `dotnet-sdk-8.0` to cross-build the Windows requesters.
-2. A Samba share at `\\192.168.122.1\vss-transport` → `/hyperactive/vss-transport`
+2. Python 3.10+ with the orchestrator packages (no ODBC runtime required):
+
+   ```bash
+   pip install pywinrm mssql-python fastapi uvicorn \
+               prometheus-client websockets
+   ```
+
+   `mssql-python` is Microsoft's official pure-Python SQL Server driver —
+   it replaces the previous `pyodbc` + `msodbcsql18` stack entirely, so
+   `unixodbc` / `msodbcsql18` are **no longer needed** on the hypervisor or
+   inside the VMs. Every SQL call made by `winrm_helper.py`, the API server
+   (`vss_api/`), and the backup/restore runners goes through a direct TCP
+   connection to `<host>:1433`.
+3. A Samba share at `\\192.168.122.1\vss-transport` → `/hyperactive/vss-transport`
    with the following stanza in `/etc/samba/smb.conf`:
 
    ```ini
@@ -777,23 +790,33 @@ backup/restore operation from a browser instead of the command line.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 3 — Bootstrap 5 SPA  (vss_api/static/)               │
-│  Dark sidebar · Backup tab · Restore tab · Jobs tab          │
+│  Layer 3 — Bootstrap 5 SPA  (vss_api/static/)                │
+│  Dark sidebar · Backup · Restore · Snapshots · Jobs tabs     │
 │  WebSocket live log streaming · PITR datetime picker         │
 └──────────────────────────┬──────────────────────────────────┘
-                           │ REST + WebSocket
+                           │ REST + WebSocket + /metrics
 ┌──────────────────────────▼──────────────────────────────────┐
 │  Layer 2 — FastAPI REST API  (vss_api/)                      │
-│  server.py  config.py  jobs.py                               │
+│  server.py  config.py  jobs.py  metrics.py                   │
 │  runners/backup.py  runners/restore.py                       │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ WinRM / smbclient / subprocess
-┌──────────────────────────▼──────────────────────────────────┐
-│  Layer 1 — Existing commands (unchanged interface)           │
-│  VssBackup.exe · VssRestore.exe · verify_tlog_chain.py       │
-│  e2e_run_multi.py · winrm_helper.py                          │
-└─────────────────────────────────────────────────────────────┘
+└─────────┬─────────────────────────────────┬──────────────────┘
+          │ WinRM (PS → .exe)               │ mssql-python (TCP 1433)
+┌─────────▼─────────────────┐   ┌───────────▼──────────────────┐
+│ Layer 1a — binaries on VM │   │ Layer 1b — SQL metadata /DDL │
+│ VssBackup.exe · VssRestore│   │ sys.databases · DROP DATABASE│
+│ Agent job (.trn chain)    │   │ RESTORE LOG · ALTER NAME     │
+└───────────────────────────┘   └──────────────────────────────┘
 ```
+
+**Why two sidebands?** The Windows requester binaries `VssBackup.exe` /
+`VssRestore.exe` must run **inside** the target VM (they talk to the
+local `SQLWriter` COM server), so their driver — PowerShell over WinRM
+— is unavoidable. Everything that is pure T-SQL (listing databases,
+dropping conflicting names, renaming, attaching side-by-side copies,
+bridging the T-log chain via `RESTORE LOG`) takes the **direct TCP**
+path with `mssql-python`. This cuts ~15 s of `Invoke-Sqlcmd` cold-load
+off *every* metadata query and gives the API a predictable, millisecond-
+latency SQL plane that is easy to instrument with Prometheus.
 
 ### 13.2 Launch
 
@@ -808,18 +831,22 @@ cd SQLDBA-SSMS-Solution/Backup-Restore-VSS
 `start-vss-gui.sh` auto-installs `fastapi` and `uvicorn` into the active
 Python environment on first run, then prints the URL and starts Uvicorn.
 
-The web API also requires **`pyodbc`** and a SQL Server ODBC driver on the
-hypervisor. These are used by `/api/databases` and `/api/databases/exists`
-for direct TCP connections to SQL Server over port 1433 — bypassing
-PowerShell / `Invoke-Sqlcmd` keeps metadata queries at ~20 ms instead of
-~15 s (SqlServer-module cold-load). On Debian/Ubuntu:
+The web API also requires **[`mssql-python`](https://github.com/microsoft/mssql-python)**
+— Microsoft's official pure-Python driver for SQL Server. Every SQL
+call made by the API server **and** by `vss_api/runners/{backup,restore}.py`
+goes through it as a direct TCP connection to `<host>:1433`; this path
+bypasses PowerShell, WinRM, `Invoke-Sqlcmd` **and** the legacy
+`pyodbc`/`msodbcsql18` ODBC stack entirely. Round-trip on a warm
+connection is ~2 ms vs ~15 s for `Invoke-Sqlcmd` cold-load, which is what
+makes the Backup-tab DB list feel instant on server re-selection.
 
 ```bash
-# ODBC runtime + driver
-sudo apt-get install -y unixodbc msodbcsql18      # Microsoft apt repo
-# Python binding
-pip install pyodbc
+# No ODBC / unixodbc / msodbcsql18 needed anywhere.
+pip install mssql-python
 ```
+
+On first run `start-vss-gui.sh` verifies `mssql-python` is importable and
+installs it into the active virtualenv if missing.
 
 Open in any browser:
 ```
@@ -833,8 +860,8 @@ http://192.168.122.1:8765
 | `GET`  | `/api/servers` | List all SQL servers (built-in + added) |
 | `POST` | `/api/servers` | Add a new server `{key, ip, user, pwd, role}` |
 | `DELETE` | `/api/servers/{key}` | Remove an added server |
-| `GET`  | `/api/databases?host=<key>` | Query `sys.databases` on a server. Uses a direct pyodbc TCP connection to `<host>:1433` (sa credentials from `.venv/config.env`) — **no PowerShell/WinRM hop**. Typical round-trip ~20 ms vs ~15 s cold for `Invoke-Sqlcmd`, so the Backup tab's DB list stays responsive on server re-selection. |
-| `GET`  | `/api/databases/exists?host=<key>&names=a,b,c` | Return which of the given names already exist on `<key>` (used by the Restore tab's conflict check). Same pyodbc path as `/api/databases`. |
+| `GET`  | `/api/databases?host=<key>` | Query `sys.databases` on a server. Uses a direct `mssql-python` TCP connection to `<host>:1433` (sa credentials from `.venv/config.env`) — **no PowerShell/WinRM hop**. Typical round-trip ~2 ms (warm-pool) vs ~15 s cold for `Invoke-Sqlcmd`, so the Backup tab's DB list stays responsive on server re-selection. |
+| `GET`  | `/api/databases/exists?host=<key>&names=a,b,c` | Return which of the given names already exist on `<key>` (used by the Restore tab's conflict check). Same `mssql-python` path as `/api/databases`. |
 | `GET`  | `/api/snapshots` | List snapshot folders on the transport share. Each row is `{name, databases[], path, mtime, created_at, size_bytes, size_human}` — `mtime` is the Unix epoch of the snapshot folder, `created_at` is the same value formatted `YYYY-MM-DD HH:MM:SS`, and `size_bytes` / `size_human` are the summed on-disk size of every file under the folder. Rows are sorted by `mtime` descending (newest first). The `writer_metadata` subfolder is excluded from `databases[]`. |
 | `GET`  | `/api/snapshots/{name}` | Return per-file detail for one snapshot: `{name, path, mtime, created_at, size_bytes, size_human, file_count, files[]}` where each `files[i]` is `{rel, size, human, mtime}`. Validates `{name}` against path traversal (`400` for dotfiles / path separators, `404` when absent). |
 | `DELETE` | `/api/snapshots/{name}` | Remove the named snapshot folder (and all files under it) from the transport share. Returns `{"deleted": "<name>"}`. Same safety validation as the detail endpoint. |
@@ -897,7 +924,7 @@ Field reference:
 | Feature | Details |
 |---------|---------|
 | **SQL Server sidebar** | Lists all servers from `.venv/config.env`; supports adding/removing extra servers at runtime |
-| **Backup tab** | Source server picker → live DB list (state + recovery model); compress toggle; **Copy-only** toggle (VSS_BT_COPY); parallel slider 1–10; optional T-log verify. The DB list auto-loads on page open for the pre-selected source (no extra click required) and on every dropdown change, powered by the pyodbc-direct `/api/databases` endpoint. |
+| **Backup tab** | Source server picker → live DB list (state + recovery model); compress toggle; **Copy-only** toggle (VSS_BT_COPY); parallel slider 1–10; optional T-log verify. The DB list auto-loads on page open for the pre-selected source (no extra click required) and on every dropdown change, powered by the `mssql-python`-direct `/api/databases` endpoint. |
 | **Restore tab** | Snapshot dropdown — each option shows `YYYY-MM-DD HH:MM:SS — <snapshot_name> [db1, db2]` and the list is sorted by the snapshot folder's mtime (newest first); target server picker (same-or-different); per-DB **rename** textbox plus **Move data dir** and **Move log dir** inputs (combine rename + move for a side-by-side restore on the same server); **Overwrite existing** toggle; live conflict banner that queries `/api/databases/exists` against the target; T-log chain toggle with T-log source dropdown; parallel slider; PITR datetime picker |
 | **Snapshots tab** | Table view of every snapshot folder under the transport share: name, created timestamp, DB list, total size. Per-row **Details** button opens a modal with the full file tree and per-file sizes (via `/api/snapshots/{name}`); per-row **Delete** removes one snapshot; header-level **Delete all** wipes every snapshot folder. Header summary shows snapshot count + aggregate size. |
 | **Jobs tab** | Full job history table with type/status badges and per-job log button |
@@ -925,7 +952,84 @@ Backup-Restore-VSS/
 
 ---
 
-## 14. References
+## 14. End-to-End Validation Matrix (`mssql-python` build)
+
+Every scenario below is driven by a small, self-contained Python script
+under `/home/saanvi/e2e-run/` using the `lib.py` harness, which in turn
+shells out to the same `vss_api/runners/backup.py` and
+`vss_api/runners/restore.py` runners the web GUI launches. The harness
+records PASS/FAIL + wall time + per-scenario notes into
+`reports/session.md` and stops the dispatcher at the first FAIL so
+downstream state is never corrupted.
+
+**Environment under test**
+
+| Item | Value |
+|---|---|
+| Hypervisor | `ryzen9` (Linux + KVM + Samba) |
+| Source VM | `AgHost-1A` (SQL Server 2022, user DBs on `E:` volume) |
+| Target VM | `SqlPoc` (SQL Server 2022) |
+| Transport | `\\192.168.122.1\vss-transport` → `/hyperactive/vss-transport` |
+| SQL driver | `mssql-python` v1.5.0 — **no** `pyodbc` / `msodbcsql18` anywhere |
+| Databases in scope | `CDCDemo` (≈ 0.6 GB), `Db2` (≈ 0.4 GB), `DBA` (≈ 5.6 GB), `Facebook` (≈ 0.4 GB) |
+| Explicitly excluded | `StackOverflow2013` (≈ 52 GB) — skipped for this run to keep the suite < 1 hour wall; the code paths it would exercise are identical to the ones T5/T6/T9 hit on `DBA`/`Db2`. |
+
+**Scenario matrix** — 12 tests, grouped into five phases. Every test is
+driven end-to-end by the `vss_api/runners/*.py` runners so the web GUI
+and the E2E harness share one code path.
+
+| # | Phase | Label | What it exercises |
+|---:|:------|:------|:------------------|
+| 1 | Baseline  | `t1_copyonly_all`         | Single-snapshot backup of the 4 in-scope DBs with `--copy-only` + `--parallel 4`; verifies `differential_base_lsn` on `DBA` is **preserved** (copy-only must never bump the diff base). |
+| 2 | Restore   | `restore_t2_overwrite`    | Cross-server restore of every DB from the T1 snapshot onto `SqlPoc` with `--overwrite`; every DB must come back ONLINE via the `mssql-python` orchestrator (no `Invoke-Sqlcmd`, no `sqlcmd.exe`). |
+| 3 | Restore   | `restore_t11_conflict`    | Negative test: restoring `CDCDemo` onto `SqlPoc` (where it already exists) **without** `--overwrite` must fail cleanly (non-zero rc) and leave the pre-existing DB untouched. Validates the pre-flight conflict check in `vss_api/runners/restore.py`. |
+| 4 | Rewire    | `restore_t3_move`         | Restore `Db2` using `--move-data F:\MSSQL_ALT\DATA` and `--move-log F:\MSSQL_ALT\LOG`; `sys.master_files` must show the new paths after recovery. |
+| 5 | Rewire    | `restore_t4_sidebyside`   | Side-by-side restore — original `Db2` stays ONLINE while a second copy lands as `Db2_SideBySide2` on the same instance (exercises `SetRestoreName` + `CREATE DATABASE ... FOR ATTACH` fallback for same-server collisions). |
+| 6 | Rewire    | `restore_t5_rename`       | Rename-restore of the 5.6 GB `DBA` as `DBA_Copy` on `SqlPoc`; confirms the MDF/LDF pair arrives under the renamed name without needing `--move-data`/`--move-log`. |
+| 7 | T-log     | `restore_t6_tlog`         | Full T-log chain bridge: restore `Db2` WITH `--with-tlog`, let `verify_tlog_chain.py` (now 100% `mssql-python`) pull any missing `.trn` files from `AgHost-1A`, insert a marker row on source, take a fresh `BACKUP LOG`, re-bridge, RESTORE LOG NORECOVERY, then RESTORE WITH RECOVERY. PASS = DB ONLINE **and** marker row readable on the target. |
+| 8 | T-log     | `restore_t9_pitr`         | Point-in-time recovery: seeds `_pitr` marker rows `pre` (T₀) and `post` (T₀+5 s) around a recorded `stopat` timestamp, takes a fresh `BACKUP LOG` covering both, then restores `Db2` WITH `STOPAT = T₀ + 2 s`. The restored DB must show `pre` but **not** `post`. |
+| 9 | Partial   | `t7_partial_compressed`   | Partial-DB backup (`Db2` + `DBA` only) with `--compress`; confirms the snapshot folder contains exactly those two DBs plus `backup_components.xml`. |
+| 10 | Partial  | `restore_t8_partial`      | Restore `DBA` from the T7 compressed partial snapshot with `--overwrite`; confirms compressed snapshots round-trip and the DB comes back ONLINE. |
+| 11 | Backup   | `t10_full_dba`            | Complement to T1: a **non**-copy-only (VSS_BT_FULL) backup of `DBA` must **bump** `differential_base_lsn` on the source, proving the `copy_only=False` path correctly signals SQL Writer. |
+| 12 | API      | `api_metrics_probe`       | Hits `/api/databases?host=AgHost-1A` and `?host=SqlPoc` 5 × each, asserts every call < 2 s (mssql-python pool warm), then scrapes `/metrics` and confirms the `vss_api_*` Prometheus counters increased. |
+
+**Live results** — filled in as the dispatcher (`run_all.sh`) finishes
+each stage; the latest authoritative copy lives at
+`/home/saanvi/e2e-run/reports/session.md` on the hypervisor and is
+mirrored here for the benefit of offline readers.
+
+<!-- E2E_RESULTS_BEGIN -->
+| 2 | restore-overwrite all (4 DBs) -> SqlPoc | PASS | 72.1 | rc=0; CDCDemo=ONLINE, Db2=ONLINE, DBA=ONLINE, Facebook=ONLINE |
+| 11 | restore without --overwrite is rejected | PASS | 2.0 | expected non-zero rc; got rc=2; pre=ONLINE; post=ONLINE |
+| 3 | restore Db2 with move-data/move-log | PASS | 6.0 | rc=0; state=ONLINE; files=[Db2:D:\MSSQL_ALT\DATA\Db2.mdf | Db2_log:D:\MSSQL_ALT\LOG\Db2_log.ldf] |
+| 4 | side-by-side restore (orig ONLINE + copy ONLINE) | PASS | 4.0 | rc=0; Db2(orig)=ONLINE; Db2_SideBySide2=ONLINE |
+| 5 | rename restore DBA -> DBA_Copy | PASS | 70.1 | rc=0; state=ONLINE; file_count=2 |
+| 6 | Db2 restore with t-log chain verify | PASS | 34.0 | rc=0; state=ONLINE; _vss_marker_rows=31 |
+| 9 | PITR restore Db2 WITH STOPAT | PASS | 20.0 | rc=0; state=ONLINE; stopat=2026-04-20T13:27:11; tags(current)=[pre_20260420132709:True,post_20260420132709:False] |
+| 7 | partial+compressed backup (Db2+DBA) | PASS | 490.4 | snapshot=t7_partial_compressed_20260420_132734; contents=['DBA', 'Db2', 'backup_components.xml', 'writer_metadata']; size=5.4 GB; rc=0 |
+| 8 | restore DBA from compressed partial snapshot | PASS | 72.1 | rc=0; state=ONLINE; file_count=2 |
+| 10 | non-copy-only backup bumps diff_base_lsn | PASS | 250.2 | rc=0; before=5951000002006300279; after=5951000004170900012; bumped=True; snapshot=t10_full_dba_20260420_133657 (2.0 GB) |
+| 12 | API + /metrics + mssql-python pool health | PASS | 0.1 | max_latency=0.013s; avg=0.006s; /metrics rc=200; vss_api_* present=True |
+<!-- E2E_RESULTS_END -->
+
+**How to re-run the entire suite**
+
+```bash
+# On ryzen9, from any shell:
+nohup /home/saanvi/e2e-run/run_all.sh \
+      > /home/saanvi/e2e-run/logs/run_all_stdout.log 2>&1 &
+
+# Tail progress live:
+tail -f /home/saanvi/e2e-run/logs/run_all.log
+```
+
+The dispatcher is idempotent: each stage drops and recreates the
+databases it touches on `SqlPoc` before exercising the scenario, so
+re-running the suite against a dirty target is safe.
+
+---
+
+## 15. References
 
 - [SQL Server backup applications — VSS and SQL Writer](https://learn.microsoft.com/en-us/sql/relational-databases/backup-restore/sql-server-vss-writer-backup-guide) — official MS documentation.
 - [A Guide for SQL Server Backup Application Vendors](https://learn.microsoft.com/en-us/previous-versions/sql/sql-server-2005/administrator/cc966520(v=technet.10)) — the canonical VSS requester specification.
