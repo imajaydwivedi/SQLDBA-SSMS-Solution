@@ -27,11 +27,33 @@ async function _loadCurrentUser() {
     _currentUser = await r.json();
     const el = document.getElementById("sidebarUser");
     if (el) el.textContent = _currentUser.display_name || _currentUser.username || "—";
-    // Show Settings tab for admin role only
-    if (_currentUser.role === "admin") {
-      document.getElementById("settingsNavItem")?.classList.remove("d-none");
-    }
+    _applyRoleUI(_currentUser.role);
   } catch (_) {}
+}
+
+function _applyRoleUI(role) {
+  const isAdmin = role === "admin";
+  // Settings tab: admin only
+  if (isAdmin) document.getElementById("settingsNavItem")?.classList.remove("d-none");
+
+  // Backup / Restore action buttons: admin only
+  const btnBackup  = document.getElementById("btnStartBackup");
+  const btnRestore = document.getElementById("btnStartRestore");
+  if (btnBackup)  { btnBackup.disabled  = !isAdmin; btnBackup.title  = isAdmin ? "" : "Admin role required"; }
+  if (btnRestore) { btnRestore.disabled = !isAdmin; btnRestore.title = isAdmin ? "" : "Admin role required"; }
+
+  // Snapshot delete controls: admin only
+  const btnDelAll  = document.getElementById("btnDeleteAllSnapshots");
+  const btnDelSel  = document.getElementById("btnDeleteSelectedSnapshots");
+  if (btnDelAll) btnDelAll.classList.toggle("d-none", !isAdmin);
+  if (btnDelSel) btnDelSel.classList.toggle("d-none", !isAdmin);
+  // Hide the select-all checkbox column when delete is not available
+  const chkAll = document.getElementById("chkAllSnapshots");
+  if (chkAll) chkAll.closest("th")?.classList.toggle("d-none", !isAdmin);
+
+  // Add-server button in sidebar: admin only
+  const btnAddSrv = document.getElementById("btnAddServer");
+  if (btnAddSrv) btnAddSrv.classList.toggle("d-none", !isAdmin);
 }
 
 
@@ -468,11 +490,12 @@ async function loadServers() {
 function renderSidebar() {
   const el = document.getElementById("serverList");
   el.innerHTML = "";
+  const canAdmin = _currentUser?.role === "admin";
   for (const [key, s] of Object.entries(_servers)) {
     const roleBadge = s.role === "source"
       ? '<span class="badge bg-info text-dark" style="font-size:9px">SOURCE</span>'
       : '<span class="badge bg-warning text-dark" style="font-size:9px">TARGET</span>';
-    const delBtn = s.builtin ? ""
+    const delBtn = (s.builtin || !canAdmin) ? ""
       : `<button class="btn btn-sm p-0 ms-auto text-danger" title="Remove"
               onclick="removeServer('${key}')"><i class="bi bi-x-circle"></i></button>`;
     el.innerHTML += `
@@ -514,11 +537,11 @@ async function addServer() {
     ip:   document.getElementById("srvIp").value.trim(),
     user: document.getElementById("srvUser").value.trim(),
     pwd:  document.getElementById("srvPwd").value,
-    role: document.getElementById("srvRole").value,
   };
   if (!body.key || !body.ip) { alert("Name and IP are required."); return; }
-  await fetch("/api/servers", { method: "POST",
+  const r = await fetch("/api/servers", { method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.detail || `Error ${r.status}`); return; }
   _addServerModal.hide();
   loadServers();
 }
@@ -1164,6 +1187,7 @@ function renderSnapshotsTable() {
   const sum   = document.getElementById("snapSummary");
   const filterEl = document.getElementById("snapFilter");
   const q = (filterEl ? filterEl.value : "").toLowerCase().trim();
+  const canAdmin = _currentUser?.role === "admin";
   const snaps = _snapshotCache.filter(s =>
     !q ||
     s.name.toLowerCase().includes(q) ||
@@ -1178,7 +1202,7 @@ function renderSnapshotsTable() {
   } else {
     tbody.innerHTML = snaps.map(s => `
       <tr>
-        <td><input class="form-check-input snap-chk" type="checkbox" value="${s.name.replace(/"/g, '&quot;')}" onchange="updateDeleteSelectedButton()"></td>
+        <td>${canAdmin ? `<input class="form-check-input snap-chk" type="checkbox" value="${s.name.replace(/"/g, '&quot;')}" onchange="updateDeleteSelectedButton()">` : ''}</td>
         <td><i class="bi bi-hdd text-info"></i></td>
         <td class="font-monospace" style="font-size:12px">${s.name}</td>
         <td style="white-space:nowrap">${s.created_at}</td>
@@ -1189,10 +1213,10 @@ function renderSnapshotsTable() {
                   onclick="showSnapshotDetail('${s.name.replace(/'/g, "\\'")}')">
             <i class="bi bi-info-circle"></i>
           </button>
-          <button class="btn btn-sm btn-link p-0 text-danger" title="Delete"
+          ${canAdmin ? `<button class="btn btn-sm btn-link p-0 text-danger" title="Delete"
                   onclick="deleteSnapshot('${s.name.replace(/'/g, "\\'")}')">
             <i class="bi bi-trash3"></i>
-          </button>
+          </button>` : ''}
         </td>
       </tr>`).join("");
   }
@@ -1517,7 +1541,7 @@ function _renderQryResults(j, metaEl, rPane, mPane) {
 
   // ── Error path ─────────────────────────────────────────────────────────────
   if (j.error) {
-    rPane.innerHTML = `<div class="p-3 text-muted fst-italic small">No results (query raised an error).</div>`;
+    rPane.innerHTML = `<div class="alert alert-danger m-3"><strong>Error:</strong> ${_qEsc(j.error)}</div>`;
     mPane.innerHTML =
       `<span class="qry-msg-error">${_qEsc(j.error)}</span>\n\n` +
       `<span class="qry-msg-info">Completion time: ${finishTs} (${elapsed}ms)</span>`;

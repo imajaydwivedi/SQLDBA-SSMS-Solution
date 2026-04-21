@@ -32,7 +32,7 @@ def _require_editor(request: Request) -> dict:
     return u
 
 def _ip(request: Request) -> str:
-    return request.headers.get("x-forwarded-for", request.client.host or "")
+    return request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")
 
 
 # ── Settings API ───────────────────────────────────────────────────────────────
@@ -184,8 +184,10 @@ def invite_user(body: InviteBody, request: Request):
         raise HTTPException(400, "Invalid role")
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', body.email):
         raise HTTPException(400, "Invalid email address")
-    token = db.create_invitation(body.email, body.role, admin["username"])
-    base  = str(request.base_url).rstrip("/")
+    import os
+    token   = db.create_invitation(body.email, body.role, admin["username"])
+    base    = (db.get_setting("site.public_url") or os.environ.get("VSS_PUBLIC_URL", "")).rstrip("/") \
+              or str(request.base_url).rstrip("/")
     link  = f"{base}/auth/accept-invite?token={token}"
     html  = (f"<p>You have been invited to VSS Console as <b>{body.role}</b>.</p>"
              f"<p><a href='{link}'>Accept invitation</a> (expires in 7 days)</p>")
@@ -222,7 +224,7 @@ def audit_log(request: Request, limit: int = 200):
     return db.get_audit_log(min(limit, 1000))
 
 
-# ── Setup vss_reader SQL login ─────────────────────────────────────────────────
+# ── Setup vss_reader SQL login (db_datareader only on user databases) ──────────
 class SetupReaderBody(BaseModel):
     host: str
 
@@ -237,31 +239,126 @@ def setup_reader_login(body: SetupReaderBody, request: Request):
     reader_pwd = db.get_setting("query.viewer_pwd", "")
     if not reader_pwd:
         raise HTTPException(400, "query.viewer_pwd not configured in Settings → Query")
-    ps = r"""
-$login = 'vss_reader'
-$pwd   = '""" + reader_pwd.replace("'", "''") + r"""'
-$sql = @"
-IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = '$($login)')
-BEGIN
-    CREATE LOGIN [$($login)] WITH PASSWORD = N'$($pwd)', CHECK_POLICY = OFF, CHECK_EXPIRATION = OFF;
-END
-ELSE ALTER LOGIN [$($login)] WITH PASSWORD = N'$($pwd)';
--- Server-level
-GRANT VIEW SERVER STATE TO [$($login)];
-GRANT VIEW ANY DATABASE TO  [$($login)];
--- Every user DB
-DECLARE @sql NVARCHAR(MAX) = '';
-SELECT @sql += 'USE ['+name+'];
-  IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name=''$($login)'')
-    CREATE USER [$($login)] FOR LOGIN [$($login)];
-  ALTER ROLE [db_datareader] ADD MEMBER [$($login)];
-  GRANT VIEW DATABASE STATE TO [$($login)];
-' FROM sys.databases WHERE database_id > 4 AND state_desc = 'ONLINE';
-EXEC sp_executesql @sql;
+    # vss_reader: db_datareader ONLY on user databases — no server-level grants.
+    ps = (
+        "$ErrorActionPreference = 'Stop'\n"
+        "$login = 'vss_reader'\n"
+        "$pwd   = '" + reader_pwd.replace("'", "''") + "'\n"
+        "$sa    = '" + (db.get_setting("query.sa_pwd", "") or "").replace("'", "''") + "'\n"
+        r"""
+$q1 = @"
+IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = '$login' AND type_desc = 'SQL_LOGIN')
+    CREATE LOGIN [$login] WITH PASSWORD = N'$pwd', CHECK_POLICY = OFF, CHECK_EXPIRATION = OFF;
+ELSE
+    ALTER LOGIN [$login] WITH PASSWORD = N'$pwd';
+ALTER LOGIN [$login] ENABLE;
 "@
-Invoke-Sqlcmd -Query $sql -ServerInstance localhost -TrustServerCertificate
-Write-Output "vss_reader provisioned OK"
+Invoke-Sqlcmd -ServerInstance localhost -Username sa -Password $sa -Query $q1 -QueryTimeout 60 -TrustServerCertificate
+Write-Host "Login created / updated."
+
+# Per-user-database: db_datareader only (database_id > 4, skip tempdb)
+$dbs = Invoke-Sqlcmd -ServerInstance localhost -Username sa -Password $sa `
+    -Query "SELECT name FROM sys.databases WHERE database_id > 4 AND state_desc = 'ONLINE' ORDER BY name" `
+    -QueryTimeout 30 -TrustServerCertificate
+foreach ($row in $dbs) {
+    $db = $row.name
+    $q2 = @"
+USE [$db];
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = '$login')
+    CREATE USER [$login] FOR LOGIN [$login];
+IF IS_ROLEMEMBER('db_datareader', '$login') = 0
+    EXEC sp_addrolemember 'db_datareader', '$login';
+"@
+    try {
+        Invoke-Sqlcmd -ServerInstance localhost -Username sa -Password $sa -Query $q2 -QueryTimeout 30 -TrustServerCertificate
+        Write-Host "Configured: $db"
+    } catch {
+        Write-Host ("WARN $db : " + $_.Exception.Message)
+    }
+}
+Write-Host "Done — $login (db_datareader only) provisioned."
 """
+    )
+    rc, out, err = run_ps(body.host, ps)
+    if rc != 0:
+        raise HTTPException(500, f"PowerShell failed: {err}")
+    return {"ok": True, "output": out}
+
+
+# ── Setup vss_editor SQL login (db_datareader + db_datawriter + server perms) ──
+class SetupEditorBody(BaseModel):
+    host: str
+
+@router.post("/api/setup/editor-login")
+def setup_editor_login(body: SetupEditorBody, request: Request):
+    _require_admin(request)
+    from vss_api.config import list_servers
+    from winrm_helper import run_ps
+    srvs = list_servers()
+    if body.host not in srvs:
+        raise HTTPException(404, f"Unknown host: {body.host}")
+    editor_pwd = db.get_setting("query.editor_pwd", "")
+    if not editor_pwd:
+        raise HTTPException(400, "query.editor_pwd not configured in Settings → Query")
+    sa_pwd = db.get_setting("query.sa_pwd", "")
+    # vss_editor: db_datareader + db_datawriter on all databases except tempdb,
+    # plus VIEW SERVER STATE, VIEW ANY DATABASE, VIEW DATABASE STATE.
+    ps = (
+        "$ErrorActionPreference = 'Stop'\n"
+        "$login = 'vss_editor'\n"
+        "$pwd   = '" + editor_pwd.replace("'", "''") + "'\n"
+        "$sa    = '" + (sa_pwd or "").replace("'", "''") + "'\n"
+        r"""
+$q1 = @"
+IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = '$login' AND type_desc = 'SQL_LOGIN')
+    CREATE LOGIN [$login] WITH PASSWORD = N'$pwd', CHECK_POLICY = OFF, CHECK_EXPIRATION = OFF;
+ELSE
+    ALTER LOGIN [$login] WITH PASSWORD = N'$pwd';
+ALTER LOGIN [$login] ENABLE;
+GRANT VIEW SERVER STATE  TO [$login];
+GRANT VIEW ANY DATABASE  TO [$login];
+"@
+Invoke-Sqlcmd -ServerInstance localhost -Username sa -Password $sa -Query $q1 -QueryTimeout 60 -TrustServerCertificate
+Write-Host "Server-level permissions granted."
+
+# All databases except tempdb (includes master, msdb for system queries)
+$dbs = Invoke-Sqlcmd -ServerInstance localhost -Username sa -Password $sa `
+    -Query "SELECT name FROM sys.databases WHERE name <> 'tempdb' AND state_desc = 'ONLINE' ORDER BY database_id" `
+    -QueryTimeout 30 -TrustServerCertificate
+foreach ($row in $dbs) {
+    $db = $row.name
+    $q2 = @"
+USE [$db];
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = '$login')
+    CREATE USER [$login] FOR LOGIN [$login];
+IF IS_ROLEMEMBER('db_datareader', '$login') = 0 EXEC sp_addrolemember 'db_datareader', '$login';
+IF IS_ROLEMEMBER('db_datawriter', '$login') = 0 EXEC sp_addrolemember 'db_datawriter', '$login';
+GRANT VIEW DATABASE STATE TO [$login];
+"@
+    try {
+        Invoke-Sqlcmd -ServerInstance localhost -Username sa -Password $sa -Query $q2 -QueryTimeout 30 -TrustServerCertificate
+        Write-Host "Configured: $db"
+    } catch {
+        Write-Host ("WARN $db : " + $_.Exception.Message)
+    }
+}
+# Grant EXECUTE on sp_WhoIsActive in master if the proc exists
+$qSPA = @"
+USE [master];
+IF OBJECT_ID('dbo.sp_WhoIsActive') IS NOT NULL
+BEGIN
+    GRANT EXECUTE ON dbo.sp_WhoIsActive TO [$login];
+    PRINT 'sp_WhoIsActive EXECUTE granted.';
+END
+"@
+try {
+    Invoke-Sqlcmd -ServerInstance localhost -Username sa -Password $sa -Query $qSPA -QueryTimeout 30 -TrustServerCertificate
+} catch {
+    Write-Host ("WARN sp_WhoIsActive grant: " + $_.Exception.Message)
+}
+Write-Host "Done — $login provisioned."
+"""
+    )
     rc, out, err = run_ps(body.host, ps)
     if rc != 0:
         raise HTTPException(500, f"PowerShell failed: {err}")

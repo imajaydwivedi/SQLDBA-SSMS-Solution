@@ -146,8 +146,10 @@ def exchange_github_code(code, base_url):
             "client_secret": db.get_setting("oauth.github.client_secret"),
             "redirect_uri": f"{base_url}/auth/callback/github",
         }, headers={"Accept": "application/json"}, timeout=15)
-        tok = r.json().get("access_token")
+        rj = r.json()
+        tok = rj.get("access_token")
         if not tok:
+            log.warning("GitHub token exchange failed: %s", rj)
             return None
         hdrs = {"Authorization": f"token {tok}", "Accept": "application/json"}
         user  = httpx.get(GITHUB_USER_URL, headers=hdrs, timeout=10).json()
@@ -156,6 +158,8 @@ def exchange_github_code(code, base_url):
             emails = httpx.get(GITHUB_EMAIL_URL, headers=hdrs, timeout=10).json()
             email = next((e["email"] for e in emails
                           if e.get("primary") and e.get("verified")), None)
+        if not email:
+            log.warning("GitHub user has no accessible email (login=%s)", user.get("login"))
         return {"email": email, "name": user.get("name") or user.get("login", "")}
     except Exception as e:
         log.warning("GitHub exchange error: %s", e)

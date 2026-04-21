@@ -40,6 +40,12 @@ if ! python3 -c "import fastapi, uvicorn" &>/dev/null; then
   pip3 install --quiet fastapi "uvicorn[standard]"
 fi
 
+# ── Install httpx (needed for OAuth token exchange) ───────────────────────────
+if ! python3 -c "import httpx" &>/dev/null; then
+  echo "[start-vss-gui] Installing httpx ..."
+  pip3 install --quiet httpx
+fi
+
 # ── Install mssql-python + prometheus deps if not already present ─────────────
 if ! python3 -c "import mssql_python" &>/dev/null; then
   echo "[start-vss-gui] Installing mssql-python (Microsoft's official driver) ..."

@@ -176,10 +176,11 @@ def sql_exec_mssql(host_key, query, params=None, database="master", timeout=30):
 _DEV_POOL: dict = {}
 
 
-def _dev_connect(host_key, database="master", timeout=15, login=None, pwd=None):
+def _dev_connect(host_key, database="master", timeout=15, login=None, pwd=None, host_ip=None):
     """Open/reuse a direct TCP connection using the given SQL login.
 
     Falls back to DEV_USER/DEV_PWD when login/pwd are not supplied.
+    host_ip overrides the HOSTS dict lookup so dynamically-added servers work.
     Dead connections are evicted and rebuilt automatically.
     """
     import mssql_python
@@ -200,8 +201,8 @@ def _dev_connect(host_key, database="master", timeout=15, login=None, pwd=None):
             try: conn.close()
             except Exception: pass
             _DEV_POOL.pop(key, None)
-    h = HOSTS[host_key]
-    cs = (f"SERVER={h['ip']},1433;DATABASE={database};"
+    ip = host_ip or HOSTS[host_key]["ip"]
+    cs = (f"SERVER={ip},1433;DATABASE={database};"
           f"UID={_login};PWD={_pwd};"
           f"Encrypt=no;TrustServerCertificate=yes;")
     conn = mssql_python.connect(cs, autocommit=True, timeout=timeout)
@@ -218,7 +219,7 @@ def _split_go(sql: str) -> list:
 
 
 def sql_query_dev(host_key, query, database="master", timeout=60, row_limit=2000,
-                  login=None, pwd=None):
+                  login=None, pwd=None, host_ip=None):
     """Execute T-SQL as vss_developer and return all result sets.
 
     Splits ``query`` on GO lines into individual batches (SSMS behaviour).
@@ -238,7 +239,7 @@ def sql_query_dev(host_key, query, database="master", timeout=60, row_limit=2000
         if not batches:
             return [], 0, "Empty query."
         conn    = _dev_connect(host_key, database=database, timeout=timeout,
-                               login=login, pwd=pwd)
+                               login=login, pwd=pwd, host_ip=host_ip)
         results = []
         for batch in batches:
             cur = conn.cursor()

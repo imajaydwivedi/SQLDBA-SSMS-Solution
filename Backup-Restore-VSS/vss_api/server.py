@@ -17,7 +17,7 @@ HERE     = os.path.dirname(os.path.abspath(__file__))
 VSS_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, VSS_ROOT)
 
-from vss_api.config import (list_servers, add_server, remove_server,
+from vss_api.config import (list_servers, list_servers_with_pwd, add_server, remove_server,
                              TRANSPORT_PATH, REQDIR)
 from vss_api.jobs import store
 import winrm_helper
@@ -26,7 +26,7 @@ from winrm_helper import sql_query_mssql, sql_query_dev, run_ps
 # ── Auth imports ──────────────────────────────────────────────────────────────
 from vss_api.auth import AUTH_ENABLED, COOKIE_NAME, decode_token, ensure_default_admin, auth_enabled
 from vss_api.auth_routes import router as _auth_router
-from vss_api.settings_routes import router as _settings_router
+from vss_api.settings_routes import router as _settings_router, _require_admin
 from vss_api import db as _db
 
 app = FastAPI(title="VSS Backup & Restore", version="1.0")
@@ -122,8 +122,9 @@ def apply_snapshot_retention() -> dict:
 
 
 @app.post("/api/snapshots/prune", status_code=200)
-def api_snapshot_prune():
+def api_snapshot_prune(request: Request):
     """Manually trigger snapshot retention enforcement and return a summary."""
+    _require_admin(request)
     return apply_snapshot_retention()
 
 
@@ -162,12 +163,14 @@ class ServerIn(BaseModel):
 
 
 @app.post("/api/servers", status_code=201)
-def api_add_server(b: ServerIn):
+def api_add_server(b: ServerIn, request: Request):
+    _require_admin(request)
     return add_server(b.key, b.ip, b.user, b.pwd, b.role)
 
 
 @app.delete("/api/servers/{key}")
-def api_del_server(key: str):
+def api_del_server(key: str, request: Request):
+    _require_admin(request)
     try:
         remove_server(key)
     except KeyError as e:
@@ -317,7 +320,8 @@ def api_snapshot_detail(name: str):
 
 
 @app.delete("/api/snapshots/{name}")
-def api_snapshot_delete(name: str):
+def api_snapshot_delete(name: str, request: Request):
+    _require_admin(request)
     import shutil
     path = _safe_snapshot_dir(name)
     shutil.rmtree(path)
@@ -325,8 +329,9 @@ def api_snapshot_delete(name: str):
 
 
 @app.delete("/api/snapshots")
-def api_snapshots_delete_all():
+def api_snapshots_delete_all(request: Request):
     """Delete every snapshot folder under TRANSPORT_PATH. Use with care."""
+    _require_admin(request)
     import shutil
     root = os.path.abspath(TRANSPORT_PATH)
     deleted, failed = [], []
@@ -367,7 +372,8 @@ class RestoreReq(BaseModel):
 
 
 @app.post("/api/jobs/backup", status_code=202)
-def api_backup(r: BackupReq):
+def api_backup(r: BackupReq, request: Request):
+    _require_admin(request)
     job    = store.create("backup", r.label)
     script = os.path.join(HERE, "runners", "backup.py")
     cmd    = ["python3", "-u", script, r.label, r.source, ",".join(r.databases)]
@@ -380,7 +386,8 @@ def api_backup(r: BackupReq):
 
 
 @app.post("/api/jobs/restore", status_code=202)
-def api_restore(r: RestoreReq):
+def api_restore(r: RestoreReq, request: Request):
+    _require_admin(request)
     job    = store.create("restore", r.snapshot)
     script = os.path.join(HERE, "runners", "restore.py")
     cmd    = ["python3", "-u", script, r.snapshot, r.target]
@@ -478,11 +485,13 @@ def api_query(r: QueryReq, request: Request):
     GO batches are split, every result set returned.
     Dangerous statements are always blocked (defence-in-depth).
     """
-    known = set(list_servers().keys())
-    if r.host not in known:
+    all_servers = list_servers_with_pwd()
+    if r.host not in all_servers:
         raise HTTPException(400, f"Unknown host: {r.host!r}")
     if _QRY_BLOCK.search(r.sql):
         raise HTTPException(403, "Query blocked: contains a forbidden statement.")
+
+    host_ip = all_servers[r.host]["ip"]
 
     # Determine caller's role (set by auth middleware; fallback for open mode)
     role = getattr(request.state, "user_role", "viewer")
@@ -492,7 +501,7 @@ def api_query(r: QueryReq, request: Request):
         login = "sa"
         pwd   = _db.get_setting("query.sa_pwd", "") or winrm_helper.SA_PWD
     elif role == "editor":
-        login = _db.get_setting("query.editor_login", "vss_developer")
+        login = _db.get_setting("query.editor_login", "vss_editor")
         pwd   = _db.get_setting("query.editor_pwd", "")
     else:  # viewer (default)
         login = _db.get_setting("query.viewer_login", "vss_reader")
@@ -506,7 +515,7 @@ def api_query(r: QueryReq, request: Request):
     results, elapsed_ms, err = sql_query_dev(
         r.host, r.sql, database=r.database,
         timeout=60, row_limit=r.row_limit,
-        login=login, pwd=pwd,
+        login=login, pwd=pwd, host_ip=host_ip,
     )
     return {"results": results, "elapsed_ms": elapsed_ms, "error": err or None}
 
@@ -588,8 +597,9 @@ def _persist_dev_pwd(pwd: str):
 
 
 @app.post("/api/setup/dev-login")
-def api_setup_dev_login(r: DevLoginSetupReq):
+def api_setup_dev_login(r: DevLoginSetupReq, request: Request):
     """Provision vss_developer on ``host`` and persist the password."""
+    _require_admin(request)
     known = set(list_servers().keys())
     if r.host not in known:
         raise HTTPException(400, f"Unknown host: {r.host!r}")

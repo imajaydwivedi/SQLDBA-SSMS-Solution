@@ -13,16 +13,36 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _base_url(request: Request) -> str:
+    """Return the public base URL, respecting VSS_PUBLIC_URL override.
+
+    Behind a reverse proxy (Cloudflare Tunnel, nginx, …) request.base_url may
+    carry the wrong scheme (http) if X-Forwarded-Proto is not forwarded.
+    Set VSS_PUBLIC_URL=https://vss.example.com in config.env (or as an env var)
+    to hard-code the correct public origin.
+    """
+    import os
+    override = (db.get_setting("site.public_url") or os.environ.get("VSS_PUBLIC_URL", "")).rstrip("/")
+    if override:
+        return override
     return str(request.base_url).rstrip("/")
 
 
-def _set_cookie(response: Response, token: str) -> None:
+def _is_secure(request: Request) -> bool:
+    """True when the request reached the client over HTTPS."""
+    import os
+    override = (db.get_setting("site.public_url") or os.environ.get("VSS_PUBLIC_URL", ""))
+    if override:
+        return override.startswith("https://")
+    return request.url.scheme == "https"
+
+
+def _set_cookie(response: Response, token: str, request: Request = None) -> None:
     response.set_cookie(
         _a.COOKIE_NAME, token,
         max_age   = _a.TOKEN_HOURS * 3600,
         httponly  = True,
         samesite  = "lax",
-        secure    = False,   # flip to True when served over HTTPS
+        secure    = _is_secure(request) if request else False,
     )
 
 
@@ -88,7 +108,7 @@ async def do_login(
     resp  = JSONResponse({"ok": True, "username": user["username"],
                           "display_name": user.get("display_name", user["username"]),
                           "role": user["role"]})
-    _set_cookie(resp, token)
+    _set_cookie(resp, token, request)
     return resp
 
 
@@ -164,7 +184,7 @@ async def callback_github(request: Request, code: str = "", state: str = "", err
 
 def _oauth_finalize(request: Request, email: str, name: str, provider: str) -> Response:
     """Find or create the OAuth user via linked accounts or email match, set cookie."""
-    ip = request.headers.get("x-forwarded-for", request.client.host or "")
+    ip = request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")
     # 1. Check linked accounts first (provider + email)
     user = db.find_linked_user(provider, email)
     if not user:
@@ -174,7 +194,7 @@ def _oauth_finalize(request: Request, email: str, name: str, provider: str) -> R
             db.link_account(user["id"], provider, email)
     if not user:
         # 3. New OAuth user — provision with default role from settings
-        default_role = db.get_setting("auth.default_oauth_role", "viewer")
+        default_role = db.get_setting("auth.default_oauth_role", "viewer") or "viewer"
         uname = re.sub(r"[^a-z0-9_]", "_", email.split("@")[0].lower())[:24]
         base = uname; i = 1
         while db.get_user_by_username(uname):
@@ -191,7 +211,7 @@ def _oauth_finalize(request: Request, email: str, name: str, provider: str) -> R
                             provider, user["role"])
     resp  = RedirectResponse("/", status_code=302)
     resp.set_cookie(_a.COOKIE_NAME, token, max_age=_a.TOKEN_HOURS * 3600,
-                    httponly=True, samesite="lax", secure=False)
+                    httponly=True, samesite="lax", secure=_is_secure(request))
     return resp
 
 

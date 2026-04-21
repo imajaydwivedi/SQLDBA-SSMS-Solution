@@ -160,6 +160,7 @@ SETTINGS_META: dict[str, tuple[str, str, bool]] = {
     "query.editor_login":        ("query",        "Editor SQL login",            False),
     "query.editor_pwd":          ("query",        "Editor SQL password",         True),
     "query.sa_pwd":              ("query",        "SA SQL password (admin role)", True),
+    "site.public_url":           ("site",         "Public base URL (e.g. https://vss.example.com) — overrides auto-detected URL behind reverse proxies", False),
 }
 
 # Default values for each setting
@@ -173,8 +174,9 @@ SETTINGS_DEFAULTS: dict[str, str] = {
     "retention.snapshot_max_bytes": str(250 * 1024 ** 3),
     "retention.job_max_count": "500", "retention.job_max_days": "30",
     "query.viewer_login": "vss_reader",  "query.viewer_pwd": "",
-    "query.editor_login": "vss_developer", "query.editor_pwd": "",
+    "query.editor_login": "vss_editor",  "query.editor_pwd": "",
     "query.sa_pwd": "",
+    "site.public_url": "",
 }
 
 # config.env variable → settings key mapping
@@ -194,6 +196,7 @@ _ENV_MAP: dict[str, str] = {
     "READER_PWD":          "query.viewer_pwd",
     "DEV_PWD":             "query.editor_pwd",
     "SA_PWD":              "query.sa_pwd",
+    "VSS_PUBLIC_URL":      "site.public_url",
 }
 
 
