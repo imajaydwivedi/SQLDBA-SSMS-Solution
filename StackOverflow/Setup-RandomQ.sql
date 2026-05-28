@@ -33,6 +33,31 @@ IF DB_NAME() <> 'StackOverflow'
   RAISERROR(N'Oops! For some reason the StackOverflow database does not exist here.', 20, 1) WITH LOG;
 GO
 
+IF OBJECT_ID('dbo.rpt_TopUsers_ByLocation') IS NULL
+  EXEC ('CREATE PROCEDURE dbo.rpt_TopUsers_ByLocation AS RETURN 0;')
+GO
+
+ALTER PROC dbo.rpt_TopUsers_ByLocation
+    @Location NVARCHAR(100), @StartDate DATE, @EndDate DATE AS
+BEGIN
+/*
+-- https://www.youtube.com/watch?v=IVqvwNlwXuI
+exec dbo.rpt_TopUsers_ByLocation
+            @Location = N'Reading, United Kingdom',
+            @StartDate = '2011-09-01', @EndDate = '2011-10-01'
+*/
+    SELECT TOP 1000 u.Reputation, u.DisplayName, u.AboutMe,
+            SUM(p.Score) AS PostsScore,
+            SUM(c.Score) AS CommentsScore
+        FROM dbo.Users u
+            LEFT OUTER JOIN dbo.Posts p ON u.Id = p.OwnerUserId AND p.CreationDate BETWEEN @StartDate AND @EndDate
+            LEFT OUTER JOIN dbo.Comments c ON u.Id = c.UserId AND c.CreationDate BETWEEN @StartDate AND @EndDate
+        WHERE u.Location = @Location
+        GROUP BY u.Reputation, u.DisplayName, u.AboutMe
+        ORDER BY SUM(p.Score) DESC
+END
+GO
+
 IF OBJECT_ID('dbo.usp_Q7521') IS NULL
   EXEC ('CREATE PROCEDURE dbo.usp_Q7521 AS RETURN 0;')
 GO
@@ -469,7 +494,6 @@ ELSE IF @Id % 2 = 0
 ELSE
 	EXEC dbo.usp_Q975 @Id
 GO
-
 --EXEC dbo.usp_RandomQ;
 
 

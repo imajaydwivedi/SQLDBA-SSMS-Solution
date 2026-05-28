@@ -24,6 +24,13 @@ DBCC TRACESTATUS(7412);
 DBCC TRACEON(7412, -1);
 DBCC TRACEOFF(7412, -1);
 
+-- Last Actual Plan Cache
+ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;
+or
+DBCC TRACEON(2451, -1);
+
+
+-- Install sp_BlitzWho - https://github.com/BrentOzarULTD/SQL-Server-First-Responder-Kit/blob/dev/Install-Azure.sql
 exec sp_BlitzWho @GetLiveQueryPlan=1
 
 --Get the execution plan and current progress for session 159

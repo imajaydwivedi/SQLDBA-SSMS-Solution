@@ -4,6 +4,7 @@ Positive
 -----------
 1118 -> Allocate uniform extents
 2371 -> (Pre-2016) Force dynamic update stats thresholds for databases below 130 compatability
+2451 -> Enable Last Actual Plan Cache for All Databases on Instance
 
 Negative
 -----------
@@ -33,4 +34,12 @@ Query Performance
 8649 -> ignore parallelism operator cost when considering Parallel Plan
 
 
+-- Enable at Query Level
 OPTION (QUERYTRACEON 8671)
+
+
+--	Enable trace flags at server level
+DBCC TRACESTATUS(7412);
+DBCC TRACEON(7412, -1);
+DBCC TRACEOFF(7412, -1);
+
