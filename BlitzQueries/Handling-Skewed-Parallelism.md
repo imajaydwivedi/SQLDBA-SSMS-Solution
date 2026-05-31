@@ -51,9 +51,10 @@ If the query cannot be rewritten and the parallelism overhead is causing server-
     OPTION (MAXDOP 2); -- Or 1 to completely bypass parallel skew
     ```
 
-### 6. [The `make_parallel()` Trick to Increase Query Plan Cost, and Force Parallelism](http://dataeducation.com/next-level-parallel-plan-forcing-an-alternative-to-8649/)
-    - [Blog post by Adam Mechanic - Next-Level Parallel Plan Forcing: An Alternative to 8649](http://dataeducation.com/next-level-parallel-plan-forcing-an-alternative-to-8649/)
-    - [Youtube Session by Adam Mechanic - Query Tuning Mastery: Manhandling Parallelism, 2014 Edition](https://www.youtube.com/watch?v=CTB7LrQVu5c&list=PLFUGPe1byxet0UYXvK0qSwo0EdS8h-r67&index=7)
+### 6. The Parallel Appy Pattern
+- [The `make_parallel()` Trick to Increase Query Plan Cost, and Force Parallelism](http://dataeducation.com/next-level-parallel-plan-forcing-an-alternative-to-8649/)
+- [Blog post by Adam Mechanic - Next-Level Parallel Plan Forcing: An Alternative to 8649](http://dataeducation.com/next-level-parallel-plan-forcing-an-alternative-to-8649/)
+- [Youtube Session by Adam Mechanic - Query Tuning Mastery: Manhandling Parallelism, 2014 Edition](https://www.youtube.com/watch?v=CTB7LrQVu5c&list=PLFUGPe1byxet0UYXvK0qSwo0EdS8h-r67&index=7)
 
 ```sql
 CREATE FUNCTION dbo.make_parallel()       
