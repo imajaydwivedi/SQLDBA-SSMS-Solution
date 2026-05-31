@@ -19,7 +19,12 @@ EXEC sp_WhoIsActive @get_outer_command = 1, @get_task_info=2, @get_additional_in
 
 -- kill 141
 
-/*	Enable LIVE Query Plans
+/*
+-- Process to Tune Queries: BE CREEPY
+brentozar.com/go/tunequeries
+	
+
+-- Enable LIVE Query Plans
 DBCC TRACESTATUS(7412);
 DBCC TRACEON(7412, -1);
 DBCC TRACEOFF(7412, -1);
