@@ -2,6 +2,31 @@
 
 **Skewed parallelism** (also known as parallel row skew) occurs when SQL Server divides a query's workload among multiple CPU threads, but **one or a few threads do almost all the heavy lifting** while the remaining threads sit idle. This completely negates the performance benefits of a high Max Degree of Parallelism (MAXDOP).
 
+![**Parallel Scan: Master of Skew**](images/parallel-scan--master-of-skew.png)
+
+- **Parallel Scan** feeds data page by page basis, or sometimes in chunks of 32 pages in *round robin or hash algorithm*. This is called **Demand Based Distribution Scheme**.
+- The **Repartitioning Tricks** force a **Fixed Based Distribution Scheme**. This sometimes lead to skew work to one or more thread depending on skewed data.
+
+![Image showing RoundRobin Distribution Scheme post Forced Repartition](images/scheme-in-repartition-trick-output.png)
+
+
+## Assumptions - 28 units of work - One big unit of work among other 27 uniform unit of works
+![Image Showing 28 units of work](images/28-units-of-work.png)
+
+### Hash/Round Robin Distribution Scheme - Equal UOW (Unit of Work) Distribution Per Thread
+- In this work units are distributed equally to each thread. Thus one thread having big unit of work will take long to execute.
+- In this, rest of the threads will be idle waiting for the big unit of work to complete.
+
+![Image showing Hash/Round Robin Distribution Scheme](images/hash-round-robin-distribution-scheme.png)
+
+### Demand Based Distribution Scheme - Skewed UOW (Unit of Work) Distribution Per Thread
+- In this work units are distributed based on the demand. Thus one thread that got big unit of work will only be assigned that unit of work. While rest of the threads work on rest of the smaller units of work.
+- In this, all the threads eventually finish their work almost at same time.
+- SQLServer giving us `Page-Based Demand or Key-Based Balanced` distribution.
+- We want `Key-Based Size-Weighted Demand` distribution.
+
+![Image showing Demand Based Distribution Scheme](images/demand-based-distribution-scheme.png)
+![Image showing Demand Based Distribution Scheme - Size Weighted](images/demand-distribution-size-weighted.png)
 ---
 
 ## 🔍 How to Detect Skewed Parallelism
@@ -51,7 +76,7 @@ If the query cannot be rewritten and the parallelism overhead is causing server-
     OPTION (MAXDOP 2); -- Or 1 to completely bypass parallel skew
     ```
 
-### 6. The Parallel Appy Pattern
+### 6. Force Parallel Plan using `The Parallel Appy Pattern` and Force RePartition using `TOP Clause in CTE`
 - [The `make_parallel()` Trick to Increase Query Plan Cost, and Force Parallelism](http://dataeducation.com/next-level-parallel-plan-forcing-an-alternative-to-8649/)
 - [Blog post by Adam Mechanic - Next-Level Parallel Plan Forcing: An Alternative to 8649](http://dataeducation.com/next-level-parallel-plan-forcing-an-alternative-to-8649/)
 - [Youtube Session by Adam Mechanic - Query Tuning Mastery: Manhandling Parallelism, 2014 Edition](https://www.youtube.com/watch?v=CTB7LrQVu5c&list=PLFUGPe1byxet0UYXvK0qSwo0EdS8h-r67&index=7)
@@ -154,6 +179,54 @@ RETURN
     HAVING        
         SUM(b1.x) IS NULL        
 )        
+GO
+```
+
+#### Sample query
+```sql
+CREATE OR ALTER PROC ##rpt_TopUsers_ByLocation
+    @Location NVARCHAR(100), @StartDate DATE, @EndDate DATE AS
+BEGIN
+/*
+-- https://www.youtube.com/watch?v=IVqvwNlwXuI
+exec ##rpt_TopUsers_ByLocation
+            @Location = N'Reading, United Kingdom',
+            @StartDate = '2011-09-01', @EndDate = '2011-10-01'
+*/
+    /*
+    SELECT TOP 1000 u.Reputation, u.DisplayName, u.AboutMe,
+            SUM(p.Score) AS PostsScore,
+            SUM(c.Score) AS CommentsScore
+        FROM dbo.Users u
+            LEFT OUTER JOIN dbo.Posts p ON u.Id = p.OwnerUserId AND p.CreationDate BETWEEN @StartDate AND @EndDate
+            LEFT OUTER JOIN dbo.Comments c ON u.Id = c.UserId AND c.CreationDate BETWEEN @StartDate AND @EndDate
+        WHERE u.Location = @Location
+        GROUP BY u.Reputation, u.DisplayName, u.AboutMe
+        ORDER BY SUM(p.Score) DESC
+        OPTION (QUERYTRACEON 8671); -- best plan
+        OPTION (QUERYTRACEON 8649); -- parallel plan
+    */
+
+    ;WITH cte_UsersOnLocation as (
+        SELECT TOP (2147483647) u.Id, u.Reputation, u.DisplayName, u.AboutMe
+        FROM dbo.Users u
+        WHERE u.Location = @Location
+        ORDER BY u.DisplayName
+    )
+    SELECT x.*
+    FROM dbo.make_parallel() as mp
+    CROSS APPLY (
+    SELECT TOP 1000 u.Reputation, u.DisplayName, u.AboutMe,
+            SUM(p.Score) AS PostsScore,
+            SUM(c.Score) AS CommentsScore
+        FROM cte_UsersOnLocation u
+            LEFT OUTER JOIN dbo.Posts p ON u.Id = p.OwnerUserId AND p.CreationDate BETWEEN @StartDate AND @EndDate
+            LEFT OUTER JOIN dbo.Comments c ON u.Id = c.UserId AND c.CreationDate BETWEEN @StartDate AND @EndDate
+        WHERE 1=1
+        GROUP BY u.Reputation, u.DisplayName, u.AboutMe
+        ORDER BY SUM(p.Score) DESC
+    ) AS x
+END
 GO
 ```
 
