@@ -146,6 +146,7 @@ exec dbo.rpt_TopUsers_ByLocation
             @StartDate = '2011-09-01', @EndDate = '2011-10-01'
 */
     SELECT TOP 1000 u.Reputation, u.DisplayName, u.AboutMe,
+            COUNT(p.Id) AS PostsCount,
             SUM(p.Score) AS PostsScore,
             SUM(c.Score) AS CommentsScore
         FROM dbo.Users u
@@ -194,6 +195,7 @@ exec ##rpt_TopUsers_ByLocation
     FROM dbo.make_parallel() as mp
     CROSS APPLY (
     SELECT TOP 1000 u.Reputation, u.DisplayName, u.AboutMe,
+            COUNT(p.Id) AS PostsCount,
             SUM(p.Score) AS PostsScore,
             SUM(c.Score) AS CommentsScore
         FROM MatchingUsers u

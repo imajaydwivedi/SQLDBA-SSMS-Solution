@@ -190,7 +190,33 @@ RETURN
 GO
 ```
 
-#### Sample query
+#### Sample Query 01
+```sql
+SELECT /* Simple query going serial */ *
+FROM dbo.Users u
+where u.Location = 'India'
+go
+
+SELECT /* Forced parallelism & reduced run time */ u.*
+FROM dbo.make_parallel() as mp
+CROSS APPLY (
+    SELECT *
+    FROM dbo.Users u
+    where u.Location = 'India'
+) u
+go
+
+
+SELECT /* Reduce row count estimates by factor of 10x10 */ u.*
+FROM dbo.Users u
+cross apply (select sum(userid) from (values (u.Id)) as u0 (userid)) as u0(userid)
+cross apply (select sum(userid) from (values (u.Id)) as u1 (userid)) as u1(userid)
+where u.Location = 'India'
+    and u.Id = u0.userid and u.Id = u1.userid
+go
+```
+
+#### Sample query 02
 ```sql
 CREATE OR ALTER PROC ##rpt_TopUsers_ByLocation
     @Location NVARCHAR(100), @StartDate DATE, @EndDate DATE AS
@@ -225,6 +251,7 @@ exec ##rpt_TopUsers_ByLocation
     FROM dbo.make_parallel() as mp
     CROSS APPLY (
     SELECT TOP 1000 u.Reputation, u.DisplayName, u.AboutMe,
+            COUNT(p.Id) AS PostsCount,
             SUM(p.Score) AS PostsScore,
             SUM(c.Score) AS CommentsScore
         FROM cte_UsersOnLocation u
