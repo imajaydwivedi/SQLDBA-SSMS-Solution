@@ -2,6 +2,14 @@
 
 **Skewed parallelism** (also known as parallel row skew) occurs when SQL Server divides a query's workload among multiple CPU threads, but **one or a few threads do almost all the heavy lifting** while the remaining threads sit idle. This completely negates the performance benefits of a high Max Degree of Parallelism (MAXDOP).
 
+
+## Possible Solutions
+- [Snake Draft Sorting in SQLServer](https://www.red-gate.com/simple-talk/databases/sql-server/t-sql-programming-sql-server/snake-draft-sorting-in-sql-server-part-1/)
+- [Forcing Repartition Using TOP Clause In SQL Server](https://www.youtube.com/watch?v=l8mZheh5-co)
+- [Fixing Parallel Plan Row Skew With VALUES Clause](https://www.youtube.com/watch?v=pQ4K0P69SAU&t=4s)
+- Forcing Parallel plan using dbo.make_parallel()
+- 
+
 ![**Parallel Scan: Master of Skew**](images/parallel-scan--master-of-skew.png)
 
 - **Parallel Scan** feeds data page by page basis, or sometimes in chunks of 32 pages in *round robin or hash algorithm*. This is called **Demand Based Distribution Scheme**.
@@ -238,6 +246,7 @@ GO
 *   **Brent Ozar**: Learn how the parallel page supplier fails in [Skewing Parallelism For Fun And Profit](https://www.brentozar.com/archive/2018/10/skewing-parallelism-for-fun-and-profit/).
 *   **Erik Darling (Darling Data)**: Read a deep-dive analysis on [A Follow Up On Fixing Parallel Plan Row Skew In SQL Server](https://erikdarling.com/a-follow-up-on-fixing-parallel-plan-row-skew-in-sql-server/).
 *   **SQLShack**: Understand the relationship between table layout and engine behavior in [Understanding Skewed Data in SQL Server](https://www.sqlshack.com/understanding-skewed-data-in-sql-server/).
+*   **Aaron Bertrand**: [Snake Draft Sorting in SQLServer](https://www.red-gate.com/simple-talk/databases/sql-server/t-sql-programming-sql-server/snake-draft-sorting-in-sql-server-part-1/)
 
 ### 📺 Video Tutorials
 *   **Fixing Row Skew with TOP**: Watch how a `CROSS APPLY` rewrite drops query times from 15 seconds to 0 seconds in [Fixing Parallel Row Skew With TOP In SQL Server](https://www.youtube.com/watch?v=l8mZheh5-co).
