@@ -25,6 +25,7 @@ SELECT	@@servername as SvrName,
 		DATEDIFF(day,create_date, GETDATE()) as ServiceStartDays,
 		DATEDIFF(hour,create_date, GETDATE()) as ServiceStartHours
 FROM sys.databases as d where d.name = 'tempdb';
+go
 
 -- Current RAM share of SQL Server
 select m.total_physical_memory_kb/1024/1024 as [Ram(GB)], system_memory_state_desc
@@ -33,6 +34,26 @@ select m.total_physical_memory_kb/1024/1024 as [Ram(GB)], system_memory_state_de
 		,convert(numeric(20,1),(m.system_cache_kb*1.0)/1024/1024) as [Cache(GB)]
 		,convert(numeric(20,0),((m.available_physical_memory_kb-m.system_cache_kb))/1024) as [Free(MB)]
 from sys.dm_os_sys_memory as m
+go
+
+-- Check Memory Allocation
+DBCC MEMORYSTATUS;
+go
+
+-- Get memory grant details for queries
+select * from sys.dm_exec_query_memory_grants;
+go
+
+-- Reconfigure the query timeout
+alter workload group [default] with 
+(
+    -- default 0
+    request_memory_grant_timeout_seconds = 60
+);
+go
+alter resource governor reconfigure;
+go
+
 
 -- Get selected server properties (SQL Server 2014)  (Query 3) (Server Properties)
 SELECT	SERVERPROPERTY('MachineName') AS [MachineName], SERVERPROPERTY('ServerName') AS [ServerName],  
