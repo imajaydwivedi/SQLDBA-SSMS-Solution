@@ -236,6 +236,21 @@ exec ##rpt_TopUsers_ByLocation
     ) AS x
 END
 GO
+
+/*
+create index tmp_Location on dbo.Users(Location, Id) include (Reputation, DisplayName);
+go
+
+create index tmp_OwnerUserId on dbo.Posts(OwnerUserId, CreationDate) include (Score);
+go
+
+create index tmp_UserId on dbo.Comments(UserId, CreationDate) include (Score);
+go
+
+exec sp_MSforeachdb ' Use [?]; ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;';
+go
+
+*/
 ```
 
 ---
