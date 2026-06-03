@@ -1,6 +1,22 @@
 /*
-	https://www.sqlshack.com/searching-the-sql-server-query-plan-cache/
-	https://blog.sqlauthority.com/2014/07/29/sql-server-ssms-top-queries-by-cpu-and-io/
+- [Troubleshoot high-CPU-usage issues in SQL Server](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/troubleshoot-high-cpu-usage-issues)
+- [Troubleshoot slow SQL Server performance caused by I/O issues](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/troubleshoot-sql-io-performance)
+- [Use the DBCC MEMORYSTATUS command to monitor memory usage in SQL Server](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/dbcc-memorystatus-monitor-memory-usage)
+- [Recommended updates and configuration options for SQL Server 2017 and 2016 with high-performance workloads](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/recommended-updates-configuration-workloads)
+- [Troubleshoot slow performance or low memory issues caused by memory grants in SQL Server](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/troubleshoot-memory-grant-issues)
+- [Troubleshoot out of memory or low memory issues in SQL Server](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/troubleshoot-memory-issues)
+- [Recommendations to reduce allocation contention in SQL Server tempdb database](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/recommendations-reduce-allocation-contention)
+- [Operations that trigger a buffer pool scan may run slowly on large-memory computers](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/buffer-pool-scan-runs-slowly-large-memory-machines)
+- [Memory-optimized tempdb metadata (HkTempDB) out of memory errors](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/memory-optimized-tempdb-out-of-memory)
+- [Troubleshoot slow-running queries in SQL Server](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/troubleshoot-slow-running-queries)
+- [Troubleshoot slow queries that result from ASYNC_NETWORK_IO wait type](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/troubleshoot-query-async-network-io)
+- [Performance degradation caused by misaligned I/O sector size errors in SQL Server](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/performance-degradation-misaligned-io-sector-error)
+- [Troubleshoot SQL Server Always On issues](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/availability-groups/troubleshooting-alwayson-issues?source=recommendations)
+- [Set trace flags with DBCC TRACEON](https://learn.microsoft.com/en-us/sql/t-sql/database-console-commands/dbcc-traceon-trace-flags-transact-sql?view=sql-server-ver17&source=recommendations)
+- [Using SQL Server Extended Events to monitor query performance](https://www.sqlshack.com/using-sql-server-extended-events-to-monitor-query-performance/)
+- [KB4041814 - Improve tempdb spill diagnostics in DMV and Extended Events in SQL Server 2017 and SQL Server 2016 SP2](https://support.microsoft.com/en-us/topic/kb4041814-improve-tempdb-spill-diagnostics-in-dmv-and-extended-events-in-sql-server-2017-and-sql-server-2016-sp2-724acea7-cc94-d0cb-faa5-22935de990ca)
+- [Queries Impacting TempDB](https://www.scarydba.com/2023/02/13/queries-impacting-tempdb/)
+- [SQL Server 2017 CU3 adds tempdb spill diagnostics in DMVs and Extended Events](https://www.brentozar.com/archive/2018/01/sql-server-2017-cu3-adds-tempdb-spill-diagnostics-dmvs-extended-events/)
 */
 
 --	https://www.brentozar.com/archive/2015/05/sql-server-version-detection/
@@ -49,6 +65,16 @@ alter workload group [default] with
 (
     -- default 0
     request_memory_grant_timeout_seconds = 60
+);
+go
+alter resource governor reconfigure;
+go
+
+-- Reconfigure max grant memory
+alter workload group [default] with 
+(
+    -- default 0
+    request_max_memory_grant_percent = 10
 );
 go
 alter resource governor reconfigure;
@@ -1131,3 +1157,77 @@ WHERE d.target_recovery_time_in_seconds <> 60
 print @sql;
 EXEC sys.sp_executesql @sql;
 go
+
+-- Changing Row Goal estimates using TOP with OPTION (OPTIMIZE FOR)
+   -- Helpful for memory grant, low estimate, high estimates, parameter sniffing issues, etc.
+DECLARE @i INT = 600000;
+SELECT TOP (1000) *
+FROM (
+    SELECT TOP (@i) *
+    FROM dbo.bigTransactionHistory
+) AS x
+ORDER BY ActualCost DESC
+OPTION (MAXDOP 1, OPTIMIZE FOR (@i = 650000));
+GO
+
+-- Changing Row Goal estimates by "faking" a bigger set of input rows using UNION ALL
+DECLARE @i INT = 0
+SELECT TOP (1000) *
+FROM (
+    SELECT TOP (600000) *
+    FROM dbo.bigTransactionHistory
+    --
+    UNION ALL
+    -- FAKE SET
+    SELECT TOP (500000) *
+    FROM dbo.bigTransactionHistory
+    WHERE @i = 1
+) AS x
+ORDER BY ActualCost DESC
+OPTION (MAXDOP 1, OPTIMIZE FOR (@i = 1));
+GO
+
+-- Re-writing large sorts to make them smaller
+SELECT /* Original Query with too many sort operations sorting a large set of data */
+    x.ProductId,
+    x.ActualCost
+FROM
+(
+    SELECT
+        ProductId,
+        ActualCost,
+        ROW_NUMBER() OVER (
+            PARTITION BY ProductId
+            ORDER BY ActualCost DESC
+        ) AS r
+    FROM bigTransactionHistory
+    WHERE
+        ActualCost >= 5000
+) AS x
+WHERE
+    x.r = 1
+ORDER BY
+    x.ActualCost DESC;
+
+SELECT TOP(500) WITH TIES
+    p.ProductId,
+    x.ActualCost
+FROM bigProduct AS p
+CROSS APPLY
+(
+    SELECT
+        bt.ActualCost,
+        ROW_NUMBER() OVER (
+            ORDER BY bt.ActualCost DESC
+        ) AS r
+    FROM bigTransactionHistory AS bt
+    WHERE
+        bt.ProductId = p.ProductId
+        AND bt.ActualCost >= 5000
+) AS x
+WHERE
+    x.r = 1
+ORDER BY
+    x.ActualCost DESC;
+go
+

@@ -3,19 +3,16 @@
   "WorkspaceRootPath": "E:\\Github\\SQLDBA-SSMS-Solution\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\__Diagnostic-Queries.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
+      "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\__Diagnostic-Queries.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\Trace-Flags-2-Use.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
       "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\Trace-Flags-2-Use.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
       "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{3EC2A162-B1E8-492C-97D4-6C97A7D43E9A}|StackOverflow\\StackOverflow.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\StackOverflow\\Setup-RandomQ.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{3EC2A162-B1E8-492C-97D4-6C97A7D43E9A}|StackOverflow\\StackOverflow.ssmssqlproj|solutionrelative:StackOverflow\\Setup-RandomQ.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\adwivedi\\Downloads\\##rpt_TopUsers_ByLocation.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
     }
   ],
   "DocumentGroupContainers": [
@@ -25,7 +22,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 5,
+          "SelectedChildIndex": 2,
           "Children": [
             {
               "$type": "Bookmark",
@@ -37,46 +34,36 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
-              "Title": "Setup-RandomQ.sql - (local).StackOverflow2013 (LAB\\adwivedi (59))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\StackOverflow\\Setup-RandomQ.sql",
-              "RelativeDocumentMoniker": "StackOverflow\\Setup-RandomQ.sql",
-              "ToolTip": "Setup-RandomQ.sql - (local).StackOverflow2013 (LAB\\adwivedi (59))",
+              "DocumentIndex": 0,
+              "Title": "__Diagnostic-Queries.sql - SQLMonitor.DBA (LAB\\adwivedi (118))",
+              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\__Diagnostic-Queries.sql",
+              "RelativeDocumentMoniker": "BlitzQueries\\__Diagnostic-Queries.sql",
+              "ToolTip": "__Diagnostic-Queries.sql - SQLMonitor.DBA (LAB\\adwivedi (118))",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-05-31T11:45:58.961Z",
-              "EditorCaption": " - (local).StackOverflow2013 (LAB\\adwivedi (59))"
+              "WhenOpened": "2026-06-03T03:33:05.619Z",
+              "EditorCaption": " - SQLMonitor.DBA (LAB\\adwivedi (118))"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
-              "Title": "##rpt_TopUsers_ByLocation.sql - (local).StackOverflow2013 (LAB\\adwivedi (118))",
-              "DocumentMoniker": "C:\\Users\\adwivedi\\Downloads\\##rpt_TopUsers_ByLocation.sql",
-              "ToolTip": "C:\\Users\\adwivedi\\Downloads\\##rpt_TopUsers_ByLocation.sql - (local).StackOverflow2013 (LAB\\adwivedi (118))",
+              "DocumentIndex": 2,
+              "Title": "QRY-sp_WhoIsActive-Usages.sql - (local).DBA (LAB\\adwivedi (58))",
+              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
+              "RelativeDocumentMoniker": "BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
+              "ToolTip": "QRY-sp_WhoIsActive-Usages.sql - (local).DBA (LAB\\adwivedi (58))",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-05-31T10:37:03.305Z",
-              "EditorCaption": " - (local).StackOverflow2013 (LAB\\adwivedi (118))"
+              "WhenOpened": "2026-05-31T10:36:47.568Z",
+              "EditorCaption": " - (local).DBA (LAB\\adwivedi (58))"
             },
             {
               "$type": "Document",
               "DocumentIndex": 1,
-              "Title": "QRY-sp_WhoIsActive-Usages.sql - (local).DBA (LAB\\adwivedi (74))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
-              "RelativeDocumentMoniker": "BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
-              "ToolTip": "QRY-sp_WhoIsActive-Usages.sql - (local).DBA (LAB\\adwivedi (74))",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-05-31T10:36:47.568Z",
-              "EditorCaption": " - (local).DBA (LAB\\adwivedi (74))"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "Trace-Flags-2-Use.sql - SQLMonitor.DBA (LAB\\adwivedi (75))",
+              "Title": "Trace-Flags-2-Use.sql - localhost.DBA (LAB\\adwivedi (68))",
               "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\Trace-Flags-2-Use.sql",
               "RelativeDocumentMoniker": "BlitzQueries\\Trace-Flags-2-Use.sql",
-              "ToolTip": "Trace-Flags-2-Use.sql - SQLMonitor.DBA (LAB\\adwivedi (75))",
+              "ToolTip": "Trace-Flags-2-Use.sql - localhost.DBA (LAB\\adwivedi (68))",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
               "WhenOpened": "2026-05-31T10:36:29.344Z",
-              "EditorCaption": " - SQLMonitor.DBA (LAB\\adwivedi (75))"
+              "EditorCaption": " - localhost.DBA (LAB\\adwivedi (68))"
             }
           ]
         }

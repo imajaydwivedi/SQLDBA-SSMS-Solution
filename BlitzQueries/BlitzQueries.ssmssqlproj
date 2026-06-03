@@ -105,11 +105,11 @@
     </LogicalFolder>
     <LogicalFolder Name="Queries" Type="0" Sorted="true">
       <Items>
-        <FileNode Name="__DiagManager-PssDiag-SqlNexus.sql">
+        <FileNode Name="__Diagnostic-Queries.sql">
           <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
           <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
           <AssociatedConnUserName />
-          <FullPath>__DiagManager-PssDiag-SqlNexus.sql</FullPath>
+          <FullPath>__Diagnostic-Queries.sql</FullPath>
         </FileNode>
         <FileNode Name="Blitz.sql">
           <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
@@ -201,6 +201,12 @@
           <AssociatedConnUserName />
           <FullPath>Detect n Reduce High VLFs.sql</FullPath>
         </FileNode>
+        <FileNode Name="DiagManager-PssDiag-SqlNexus.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>DiagManager-PssDiag-SqlNexus.sql</FullPath>
+        </FileNode>
         <FileNode Name="Find-Indirect-Connections.sql">
           <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
           <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
@@ -218,12 +224,6 @@
           <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
           <AssociatedConnUserName />
           <FullPath>Fragmentation-Analysis.sql</FullPath>
-        </FileNode>
-        <FileNode Name="Other queries.sql">
-          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
-          <AssociatedConnSrvName>(local)</AssociatedConnSrvName>
-          <AssociatedConnUserName />
-          <FullPath>Other queries.sql</FullPath>
         </FileNode>
         <FileNode Name="Plan-Cache-Analysis.sql">
           <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:(local):True</AssociatedConnectionMoniker>
