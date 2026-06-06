@@ -1,20 +1,7 @@
 {
   "Version": 1,
   "WorkspaceRootPath": "E:\\Github\\SQLDBA-SSMS-Solution\\",
-  "Documents": [
-    {
-      "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\__Diagnostic-Queries.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\__Diagnostic-Queries.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\Trace-Flags-2-Use.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\Trace-Flags-2-Use.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
-    }
-  ],
+  "Documents": [],
   "DocumentGroupContainers": [
     {
       "Orientation": 0,
@@ -22,7 +9,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 2,
+          "SelectedChildIndex": -1,
           "Children": [
             {
               "$type": "Bookmark",
@@ -31,39 +18,6 @@
             {
               "$type": "Bookmark",
               "Name": "ST:0:0:{1c4feeaa-4718-4aa9-859d-94ce25d182ba}"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "__Diagnostic-Queries.sql - SQLMonitor.DBA (LAB\\adwivedi (118))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\__Diagnostic-Queries.sql",
-              "RelativeDocumentMoniker": "BlitzQueries\\__Diagnostic-Queries.sql",
-              "ToolTip": "__Diagnostic-Queries.sql - SQLMonitor.DBA (LAB\\adwivedi (118))",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-06-03T03:33:05.619Z",
-              "EditorCaption": " - SQLMonitor.DBA (LAB\\adwivedi (118))"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 2,
-              "Title": "QRY-sp_WhoIsActive-Usages.sql - (local).DBA (LAB\\adwivedi (58))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
-              "RelativeDocumentMoniker": "BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
-              "ToolTip": "QRY-sp_WhoIsActive-Usages.sql - (local).DBA (LAB\\adwivedi (58))",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-05-31T10:36:47.568Z",
-              "EditorCaption": " - (local).DBA (LAB\\adwivedi (58))"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 1,
-              "Title": "Trace-Flags-2-Use.sql - localhost.DBA (LAB\\adwivedi (68))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\Trace-Flags-2-Use.sql",
-              "RelativeDocumentMoniker": "BlitzQueries\\Trace-Flags-2-Use.sql",
-              "ToolTip": "Trace-Flags-2-Use.sql - localhost.DBA (LAB\\adwivedi (68))",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-05-31T10:36:29.344Z",
-              "EditorCaption": " - localhost.DBA (LAB\\adwivedi (68))"
             }
           ]
         }
