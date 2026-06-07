@@ -29,12 +29,10 @@ GO
 USE StackOverflow;
 GO
 
-select top 1000 *
-from dbo.Posts
-
 IF DB_NAME() <> 'StackOverflow'
   RAISERROR(N'Oops! For some reason the StackOverflow database does not exist here.', 20, 1) WITH LOG;
 GO
+
 
 if OBJECT_ID('dbo.Tags') is null
 BEGIN
@@ -50,22 +48,27 @@ go
 if OBJECT_ID('dbo.Tags') is not null and not exists (select 1 from dbo.Tags)
 begin
     print 'Populating dbo.Tags table...';
-    
+
     declare @_BatchSize bigint = 1000;
-    declare @_BatchCount bigint = (select count(*) from dbo.Posts)/@_BatchSize;    
-    declare @_CurrentBatch bigint = 0;
+    declare @_BatchCount bigint = ((select count(*) from dbo.Posts)/@_BatchSize)+1;
+    declare @_CurrentBatch bigint = 1;
+    declare @_StartId bigint = 0;
+    declare @_EndId bigint = 0;
 
     while @_CurrentBatch <= @_BatchCount
     begin
-        print 'Processing batch ' + cast(@_CurrentBatch as varchar) + ' of ' + cast(@_BatchCount as varchar);
+        set @_StartId = (@_CurrentBatch-1)*@_BatchSize;
+        set @_EndId = @_StartId + @_BatchSize - 1;
+        print 'Processing "dbo.Tags" batch ' + cast(@_CurrentBatch as varchar) + ' of ' + cast(@_BatchCount as varchar);
+        print '  Processing Id '+convert(varchar(10),@_StartId)+' to '+convert(varchar(10), @_EndId);
 
         ;WITH tags AS
         (
-            SELECT TagName = value
+            SELECT TagName = ltrim(rtrim(value))
             FROM dbo.Posts p
             CROSS APPLY STRING_SPLIT(TRANSLATE(p.Tags, '<>', '  '),' ')
             WHERE p.Tags IS NOT NULL
-            and p.Id BETWEEN (@_CurrentBatch * @_BatchSize) AND ((@_CurrentBatch + 1) * @_BatchSize)
+            and p.Id BETWEEN @_StartId AND @_EndId
         )
         INSERT dbo.Tags (TagName)
         SELECT DISTINCT TagName
@@ -86,8 +89,8 @@ go
 
 if OBJECT_ID('dbo.PostTags') is null
 begin
-    create table dbo.PostTags 
-    (	PostId int not null, 
+    create table dbo.PostTags
+    (	PostId int not null,
 	    TagId int not null,
 	    constraint pk_PostTags primary key (PostId, Tagid),
 	    constraint fk_PostTags__PostId foreign key (PostId) references dbo.Posts (Id),
@@ -103,18 +106,18 @@ GO
 if object_id('dbo.PostTags') is not null and not exists (select 1 from dbo.PostTags)
 begin
     print 'Populating dbo.PostTags table...';
-    
+
     declare @_BatchSize bigint = 1000;
     declare @_BatchCount bigint = ((select count(*) from dbo.Posts)/@_BatchSize)+1;
     declare @_CurrentBatch bigint = 1;
     declare @_StartId bigint = 0;
     declare @_EndId bigint = 0;
-    
+
     while @_CurrentBatch <= @_BatchCount
     begin
         set @_StartId = (@_CurrentBatch-1)*@_BatchSize;
         set @_EndId = @_StartId + @_BatchSize - 1;
-        print 'Processing batch ' + cast(@_CurrentBatch as varchar) + ' of ' + cast(@_BatchCount as varchar);
+        print 'Processing "dbo.PostTags" batch ' + cast(@_CurrentBatch as varchar) + ' of ' + cast(@_BatchCount as varchar);
         print '  Processing Id '+convert(varchar(10),@_StartId)+' to '+convert(varchar(10), @_EndId);
 
         ;WITH tags AS
@@ -139,7 +142,6 @@ go
 alter table dbo.PostTags with check check constraint fk_PostTags__PostId;
 alter table dbo.PostTags with check check constraint fk_PostTags__TagId;
 GO
-
 
 
 CREATE OR ALTER FUNCTION dbo.make_parallel()       
