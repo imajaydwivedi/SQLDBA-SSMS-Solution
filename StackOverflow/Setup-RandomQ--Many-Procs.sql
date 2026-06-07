@@ -7,7 +7,7 @@
 	https://www.brentozar.com/archive/2017/02/simulating-workload-ostress-agent-jobs/
 */
 /*
-restore database StackOverflow from disk = N'G:\StackOverflow_122018_Full_OriginalCopy.bak' 
+restore database StackOverflow from disk = N'G:\StackOverflow_122018_Full_OriginalCopy.bak'
 	with stats=3
 	,move 'StackOverflow_1' to 'F:\MSSQL14.SQL2017\MSSQL\DATA\StackOverflow_1.mdf'
 	,move 'StackOverflow_2' to 'F:\MSSQL14.SQL2017\MSSQL\DATA\StackOverflow_2.mdf'
@@ -29,9 +29,6 @@ GO
 USE StackOverflow;
 GO
 
-select top 1000 *
-from dbo.Posts
-
 IF DB_NAME() <> 'StackOverflow'
   RAISERROR(N'Oops! For some reason the StackOverflow database does not exist here.', 20, 1) WITH LOG;
 GO
@@ -50,9 +47,9 @@ go
 if OBJECT_ID('dbo.Tags') is not null and not exists (select 1 from dbo.Tags)
 begin
     print 'Populating dbo.Tags table...';
-    
+
     declare @_BatchSize bigint = 1000;
-    declare @_BatchCount bigint = (select count(*) from dbo.Posts)/@_BatchSize;    
+    declare @_BatchCount bigint = (select count(*) from dbo.Posts)/@_BatchSize;
     declare @_CurrentBatch bigint = 0;
 
     while @_CurrentBatch <= @_BatchCount
@@ -86,8 +83,8 @@ go
 
 if OBJECT_ID('dbo.PostTags') is null
 begin
-    create table dbo.PostTags 
-    (	PostId int not null, 
+    create table dbo.PostTags
+    (	PostId int not null,
 	    TagId int not null,
 	    constraint pk_PostTags primary key (PostId, Tagid),
 	    constraint fk_PostTags__PostId foreign key (PostId) references dbo.Posts (Id),
@@ -103,13 +100,13 @@ GO
 if object_id('dbo.PostTags') is not null and not exists (select 1 from dbo.PostTags)
 begin
     print 'Populating dbo.PostTags table...';
-    
+
     declare @_BatchSize bigint = 1000;
     declare @_BatchCount bigint = ((select count(*) from dbo.Posts)/@_BatchSize)+1;
     declare @_CurrentBatch bigint = 1;
     declare @_StartId bigint = 0;
     declare @_EndId bigint = 0;
-    
+
     while @_CurrentBatch <= @_BatchCount
     begin
         set @_StartId = (@_CurrentBatch-1)*@_BatchSize;
@@ -142,103 +139,103 @@ GO
 
 
 
-CREATE OR ALTER FUNCTION dbo.make_parallel()       
-RETURNS TABLE AS        
-RETURN        
-(        
-    WITH        
-    a(x) AS        
-    (        
-        SELECT        
-            a0.*        
-        FROM        
-        (        
-            VALUES        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),        
-                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1)        
-        ) AS a0(x)        
-    ),        
-    b(x) AS        
-    (        
-        SELECT TOP(9223372036854775807)        
-            1        
-        FROM        
-            a AS a1,        
-            a AS a2,        
-            a AS a3,        
-            a AS a4        
-        WHERE        
+CREATE OR ALTER FUNCTION dbo.make_parallel()
+RETURNS TABLE AS
+RETURN
+(
+    WITH
+    a(x) AS
+    (
+        SELECT
+            a0.*
+        FROM
+        (
+            VALUES
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+                (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1), (1)
+        ) AS a0(x)
+    ),
+    b(x) AS
+    (
+        SELECT TOP(9223372036854775807)
+            1
+        FROM
+            a AS a1,
+            a AS a2,
+            a AS a3,
+            a AS a4
+        WHERE
             a1.x % 2 = 0
-    )        
-    SELECT        
-        SUM(b1.x) AS x        
-    FROM        
-        b AS b1        
-    HAVING        
-        SUM(b1.x) IS NULL        
-)        
+    )
+    SELECT
+        SUM(b1.x) AS x
+    FROM
+        b AS b1
+    HAVING
+        SUM(b1.x) IS NULL
+)
 GO
 
 IF OBJECT_ID('dbo.rpt_TopUsers_ByLocation') IS NULL
@@ -323,29 +320,29 @@ AS
 BEGIN
     /* Example usage:
     EXEC dbo.usp_Q785 @UserId = 12345;
-    
-    This procedure returns a list of tags and the count of upvotes 
+
+    This procedure returns a list of tags and the count of upvotes
     received by the specified user for each tag.
     */
 
     SET NOCOUNT ON;
 
-    SELECT 
+    SELECT
         t.TagName,
-        COUNT(*) AS UpVotes 
+        COUNT(*) AS UpVotes
     FROM dbo.Tags t
     INNER JOIN dbo.PostTags pt ON pt.TagId = t.id
     INNER JOIN dbo.Posts p ON p.ParentId = pt.PostId
-    INNER JOIN dbo.Votes v ON v.PostId = p.Id 
+    INNER JOIN dbo.Votes v ON v.PostId = p.Id
     WHERE p.OwnerUserId = @UserId
       AND v.VoteTypeId = 2 -- 2 represents UpVotes
-    GROUP BY t.TagName 
+    GROUP BY t.TagName
     ORDER BY UpVotes DESC;
 END
 GO
 
 IF OBJECT_ID('dbo.usp_Q7521') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q7521 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q7521 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q7521 @UserId INT AS
@@ -357,7 +354,7 @@ BEGIN
 
 select
     count(a.Id) as [Accepted Answers],
-    sum(case when a.Score = 0 then 0 else 1 end) as [Scored Answers],  
+    sum(case when a.Score = 0 then 0 else 1 end) as [Scored Answers],
     sum(case when a.Score = 0 then 1 else 0 end) as [Unscored Answers],
     sum(CASE WHEN a.Score = 0 then 1 else 0 end)*1000 / count(a.Id) / 10.0 as [Percentage Unscored]
 from
@@ -375,7 +372,7 @@ GO
 
 
 IF OBJECT_ID('dbo.usp_Q36660') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q36660 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q36660 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q36660 @Useless INT AS
@@ -383,7 +380,7 @@ BEGIN
 /* Source: http://data.stackexchange.com/stackoverflow/query/36660/most-down-voted-questions */
 
 select top 20 count(v.PostId) as 'Vote count', v.PostId AS [Post Link],p.Body
-from Votes v 
+from Votes v
 inner join Posts p on p.Id=v.PostId
 where PostTypeId = 1 and v.VoteTypeId=3
 group by v.PostId,p.Body
@@ -394,14 +391,14 @@ GO
 
 
 IF OBJECT_ID('dbo.usp_Q949') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q949 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q949 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q949 @UserId INT AS
 BEGIN
 /* Source: http://data.stackexchange.com/stackoverflow/query/949/what-is-my-accepted-answer-percentage-rate */
 
-SELECT 
+SELECT
     (CAST(Count(a.Id) AS float) / (SELECT Count(*) FROM Posts WHERE OwnerUserId = @UserId AND PostTypeId = 2) * 100) AS AcceptedPercentage
 FROM
     Posts q
@@ -418,20 +415,20 @@ GO
 
 
 IF OBJECT_ID('dbo.usp_Q466') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q466 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q466 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q466 @Useless INT AS
 BEGIN
 /* Source: http://data.stackexchange.com/stackoverflow/query/466/most-controversial-posts-on-the-site */
-set nocount on 
+set nocount on
 
-declare @VoteStats table (PostId int, up int, down int) 
+declare @VoteStats table (PostId int, up int, down int)
 
 insert @VoteStats
 select
-    PostId, 
-    up = sum(case when VoteTypeId = 2 then 1 else 0 end), 
+    PostId,
+    up = sum(case when VoteTypeId = 2 then 1 else 0 end),
     down = sum(case when VoteTypeId = 3 then 1 else 0 end)
 from Votes
 where VoteTypeId in (2,3)
@@ -440,7 +437,7 @@ group by PostId
 set nocount off
 
 
-select top 100 p.Id as [Post Link] , up, down from @VoteStats 
+select top 100 p.Id as [Post Link] , up, down from @VoteStats
 join Posts p on PostId = p.Id
 where down > (up * 0.5) and p.CommunityOwnedDate is null and p.ClosedDate is null
 order by up desc
@@ -451,23 +448,23 @@ GO
 
 
 IF OBJECT_ID('dbo.usp_Q947') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q947 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q947 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q947 @UserId INT AS
 BEGIN
 /* Source: http://data.stackexchange.com/stackoverflow/query/947/my-comment-score-distribution */
 
-SELECT 
+SELECT
     Count(*) AS CommentCount,
     Score
-FROM 
+FROM
     Comments
-WHERE 
+WHERE
     UserId = @UserId
-GROUP BY 
+GROUP BY
     Score
-ORDER BY 
+ORDER BY
     Score DESC
 END
 GO
@@ -476,7 +473,7 @@ GO
 
 
 IF OBJECT_ID('dbo.usp_Q3160') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q3160 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q3160 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q3160 @UserId INT AS
@@ -510,7 +507,7 @@ GO
 
 
 IF OBJECT_ID('dbo.usp_Q6627') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q6627 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q6627 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q6627 @Useless INT AS
@@ -550,12 +547,8 @@ END
 GO
 
 
-
-
-
-
 IF OBJECT_ID('dbo.usp_Q6772') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q6772 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q6772 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q6772 @UserId INT AS
@@ -579,15 +572,8 @@ END
 GO
 
 
-
-
-
-
-
-
-
 IF OBJECT_ID('dbo.usp_Q6856') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q6856 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q6856 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q6856 @MinReputation INT, @Upvotes INT = 100 AS
@@ -597,7 +583,7 @@ BEGIN
 select top 100
   Id as [User Link],
   round((100.0 * (Reputation/10)) / (UpVotes+1), 2) as [Ratio %],
-  Reputation as Rep, 
+  Reputation as Rep,
   UpVotes as [+ Votes],
   DownVotes [- Votes]
 from Users
@@ -609,17 +595,15 @@ END
 GO
 
 
-
-
 IF OBJECT_ID('dbo.usp_Q952') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q952 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q952 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q952 @Useless INT AS
 BEGIN
 /* Source: http://data.stackexchange.com/stackoverflow/query/952/top-500-answerers-on-the-site */
 
-SELECT 
+SELECT
     TOP 500
     Users.Id as [User Link],
     Count(Posts.Id) AS Answers,
@@ -628,7 +612,7 @@ FROM
     Posts
   INNER JOIN
     Users ON Users.Id = OwnerUserId
-WHERE 
+WHERE
     PostTypeId = 2 and CommunityOwnedDate is null and ClosedDate is null
 GROUP BY
     Users.Id, DisplayName
@@ -641,13 +625,8 @@ END
 GO
 
 
-
-
-
-
-
 IF OBJECT_ID('dbo.usp_Q975') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q975 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q975 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q975 @Useless INT AS
@@ -657,34 +636,32 @@ BEGIN
 -- Users with more than one duplicate account and a more that 1000 reputation in aggregate
 -- A list of users that have duplicate accounts on site, based on the EmailHash and lots of reputation is riding on it
 
-SELECT 
+SELECT
     u1.EmailHash,
     Count(u1.Id) AS Accounts,
     (
-        SELECT Cast(u2.Id AS varchar) + ' (' + u2.DisplayName + ' ' + Cast(u2.Reputation as varchar) + '), ' 
-        FROM Users u2 
+        SELECT Cast(u2.Id AS varchar) + ' (' + u2.DisplayName + ' ' + Cast(u2.Reputation as varchar) + '), '
+        FROM Users u2
         WHERE u2.EmailHash = u1.EmailHash order by u2.Reputation desc FOR XML PATH ('')) AS IdsAndNames
 FROM
     Users u1
 WHERE
     u1.EmailHash IS NOT NULL
-    and (select sum(u3.Reputation) from Users u3 where u3.EmailHash = u1.EmailHash) > 1000  
+    and (select sum(u3.Reputation) from Users u3 where u3.EmailHash = u1.EmailHash) > 1000
     and (select count(*) from Users u3 where u3.EmailHash = u1.EmailHash and Reputation > 10) > 1
 GROUP BY
     u1.EmailHash
 HAVING
     Count(u1.Id) > 1
-ORDER BY 
+ORDER BY
     Accounts DESC
 
 END
 GO
 
 
-
-
 IF OBJECT_ID('dbo.usp_Q8116') IS NULL
-  EXEC ('CREATE PROCEDURE dbo.usp_Q8116 AS RETURN 0;')
+  EXEC ('CREATE PROCEDURE dbo.usp_Q8116 @Useless INT AS RETURN 0;')
 GO
 
 ALTER PROC dbo.usp_Q8116 @UserId INT AS
@@ -738,16 +715,13 @@ END
 GO
 
 
-
-
-CREATE OR ALTER PROCEDURE dbo.usp_Q4038
-AS
+CREATE OR ALTER PROCEDURE dbo.usp_Q4038 @UserId INT AS
 BEGIN
 
 SET NOCOUNT ON;
 	/*
 	Example Execution:
-	EXEC dbo.usp_Q4038;
+	EXEC dbo.usp_Q4038 @UserId = <value>;
 	*/
 -- https://data.stackexchange.com/stackoverflow/query/4038/find-interesting-unanswered-questions
 -- Find interesting unanswered questions
@@ -755,19 +729,18 @@ SET NOCOUNT ON;
 -- a combined weight which takes into account: score, askers reputation and how
 -- well you do on that particular tag
 
-DECLARE @UserId int = 4449743
 
 create table #tags (TagId int, [Count] int)
 
-insert #tags 
-SELECT TOP 20 
+insert #tags
+SELECT TOP 20
     TagId,
-    COUNT(*) AS UpVotes 
+    COUNT(*) AS UpVotes
 FROM Tags
     INNER JOIN PostTags ON PostTags.TagId = Tags.id
     INNER JOIN Posts ON Posts.ParentId = PostTags.PostId
     INNER JOIN Votes ON Votes.PostId = Posts.Id and VoteTypeId = 2
-WHERE 
+WHERE
     Posts.OwnerUserId = @UserId
 GROUP BY TagId
 ORDER BY UpVotes DESC
@@ -775,57 +748,55 @@ ORDER BY UpVotes DESC
 
 create table #unanswered (Id int primary key)
 
-insert #unanswered 
+insert #unanswered
 select q.Id  from Posts q
 where (select count(*) from Posts a where a.ParentId = q.Id and a.Score > 0) = 0
-and CommunityOwnedDate is null and ClosedDate is null and q.ParentId is null 
+and CommunityOwnedDate is null and ClosedDate is null and q.ParentId is null
 and AcceptedAnswerId is null
 
 
-select top 2000 u.Id as [Post Link], 
-(sum(t.[Count]) / 10.0 + us.Reputation / 200.0 + p.Score * 100) as Weight 
+select top 2000 u.Id as [Post Link],
+(sum(t.[Count]) / 10.0 + us.Reputation / 200.0 + p.Score * 100) as Weight
 from #unanswered u
 join Posts p on u.Id = p.Id
 join PostTags pt on pt.PostId = u.Id
-join #tags t on t.TagId = pt.TagId  
-join Users us on us.Id = p.OwnerUserId  
-group by u.Id, us.Reputation, p.Score 
-order by Weight desc 
+join #tags t on t.TagId = pt.TagId
+join Users us on us.Id = p.OwnerUserId
+group by u.Id, us.Reputation, p.Score
+order by Weight desc
 END
-
 GO
 
-CREATE OR ALTER PROCEDURE dbo.usp_Q2357
-AS
+
+
+CREATE OR ALTER PROCEDURE dbo.usp_Q2357 @UserId INT AS
 BEGIN
 
 SET NOCOUNT ON;
 	/*
 	Example Execution:
-	EXEC dbo.usp_Q2357;
+	EXEC dbo.usp_Q2357 @UserId = <value>;
 	*/
 -- https://data.stackexchange.com/stackoverflow/query/2357/how-many-upvotes-do-i-have-towards-tag-specialist-badges
 
-DECLARE @UserId int = ##UserId##
 
 SELECT TOP 20 /* How many upvotes do I have towards tag-specialist badges */
     TagName,
-    COUNT(*) AS UpVotes 
+    COUNT(*) AS UpVotes
 FROM Tags
     INNER JOIN PostTags ON PostTags.TagId = Tags.id
     INNER JOIN Posts ON Posts.ParentId = PostTags.PostId
     INNER JOIN Votes ON Votes.PostId = Posts.Id and VoteTypeId = 2
-WHERE 
+WHERE
     Posts.OwnerUserId = @UserId
     AND Posts.CommunityOwnedDate IS NULL
-GROUP BY TagName 
+GROUP BY TagName
 ORDER BY UpVotes DESC
 END
-
 GO
 
-CREATE OR ALTER PROCEDURE dbo.usp_Q951
-AS
+
+CREATE OR ALTER PROCEDURE dbo.usp_Q951 @Useless INT AS
 BEGIN
 
 SET NOCOUNT ON;
@@ -838,32 +809,31 @@ SET NOCOUNT ON;
 -- Enter Query Title
 -- Enter Query Description
 select /* Low views, high votes yet unanswered */
-		top 500 Id as [Post Link], Score, ViewCount from Posts 
+		top 500 Id as [Post Link], Score, ViewCount from Posts
 where Score > 2 and ViewCount <> 0 and ParentId is null and AcceptedAnswerId is null
 order by ViewCount asc
 END
-
 GO
 
-CREATE OR ALTER PROCEDURE dbo.usp_Q1433
-AS
+
+
+CREATE OR ALTER PROCEDURE dbo.usp_Q1433 @MinAnswers INT AS
 BEGIN
 
 SET NOCOUNT ON;
 	/*
 	Example Execution:
-	EXEC dbo.usp_Q1433;
+	EXEC dbo.usp_Q1433 @MinAnswers = <value>;
 	*/
 -- https://data.stackexchange.com/stackoverflow/query/1433/users-with-highest-accept-rate-of-their-answers
 /* Does not count self-answers. Shows users with at least @MinAnswers answers.
 */
 
 -- Users with highest accept rate of their answers
--- Does not count self-answers. 
+-- Does not count self-answers.
 -- Shows users with at least @MinAnswers answers.
 
-DECLARE @MinAnswers int = 20
-	
+
 SELECT TOP 100 /* Users with highest accept rate of their answers */
   u.Id AS [User Link],
   count(*) AS NumAnswers,
@@ -872,17 +842,17 @@ SELECT TOP 100 /* Users with highest accept rate of their answers */
 FROM Posts a
 INNER JOIN Users u ON u.Id = a.OwnerUserId
 INNER JOIN Posts q ON a.ParentId = q.Id
-WHERE 
+WHERE
   (q.OwnerUserId <> u.Id OR q.OwnerUserId IS NULL)   --no self answers
 GROUP BY u.Id
 HAVING count(*) >= @MinAnswers
 ORDER BY AcceptedPercent DESC, NumAnswers DESC
 END
-
 GO
 
-create or alter procedure dbo.usp_Q7672
-as
+
+
+create or alter procedure dbo.usp_Q7672 @Useless INT AS
 begin
 
 	/*
@@ -918,12 +888,11 @@ begin
 	ON P.Year = V.Year AND P.Month = V.Month
 	order by P.Year, P.Month
 end
-
-
 GO
 
-create or alter procedure dbo.usp_Q1075286
-as
+
+
+create or alter procedure dbo.usp_Q1075286 @Useless INT AS
 begin
 
 	/*
@@ -939,7 +908,7 @@ begin
 	SELECT date1, count(id) as cnt
 	FROM (
 
-	  SELECT 
+	  SELECT
 		FORMAT (d.CreationDate, 'yy-MM') as [date1],
 		(d.Id) as id
 	  FROM Posts d  -- d=duplicate
@@ -950,19 +919,16 @@ begin
 		d.PostTypeId = 1  -- 1=Question
 		AND pl.LinkTypeId = 3  -- 3=duplicate
 		AND ph.PostHistoryTypeId = 10  -- 10=Post Closed
-    
+
 	  ) as t1
 	group by date1
 	order by date1
 end
-
-
-
-
 GO
 
-create or alter procedure dbo.usp_Q1256
-as
+
+
+create or alter procedure dbo.usp_Q1256 @Useless INT AS
 begin
 
 	/*
@@ -1013,16 +979,12 @@ begin
 	ORDER BY
 			4 DESC
 end
-
-
-
-
 GO
 
-create or alter procedure dbo.usp_Q877
-as
-begin
 
+
+create or alter procedure dbo.usp_Q877 @Useless INT AS
+begin
 	/*
 	Example Execution:
 	EXEC dbo.usp_Q877;
@@ -1033,14 +995,11 @@ begin
 
 	select Id as [Post Link], Body, Score from Posts where Len(Title) < 12 and ParentId is null
 end
-
-
-
-
 GO
 
-create or alter procedure dbo.usp_Q886
-as
+
+
+create or alter procedure dbo.usp_Q886 @Useless INT AS
 begin
 
 	/*
@@ -1060,14 +1019,11 @@ begin
 	having count(id) > 1
 	order by count(id) desc;
 end
-
-
-
-
 GO
 
-create or alter procedure dbo.usp_Q1075285
-as
+
+
+create or alter procedure dbo.usp_Q1075285 @Useless INT AS
 begin
 
 	/*
@@ -1079,7 +1035,7 @@ begin
 	SELECT date1, count(id) as cnt
 	FROM (
 
-	  SELECT 
+	  SELECT
 		FORMAT (d.CreationDate, 'yy-MM') as [date1],
 		(d.Id) as id
 	  FROM Posts d  -- d=duplicate
@@ -1088,16 +1044,14 @@ begin
 		LEFT JOIN Posts o ON o.Id = pl.RelatedPostId  -- o=original
 	  WHERE
 		d.PostTypeId = 1  -- 1=Question
-    
+
 	  ) as t1
 	group by date1
 	order by date1
 end
-
-
-
-
 GO
+
+
 
 create or alter procedure dbo.usp_Q10418 @BadgeName nvarchar(80)
 as
@@ -1135,14 +1089,11 @@ begin
 	ORDER BY
 	   [DaysMembership] ASC
 end
-
-
-
-
 GO
 
-create or alter procedure dbo.usp_Q946
-as
+
+
+create or alter procedure dbo.usp_Q946 @Useless INT AS
 begin
 
 	/*
@@ -1174,14 +1125,11 @@ begin
 	ORDER BY
 		RepPerDays DESC
 end
-
-
-
-
 GO
 
-create or alter procedure dbo.usp_Q6607
-as
+
+
+create or alter procedure dbo.usp_Q6607 @Useless INT AS
 begin
 
 	/*
@@ -1192,27 +1140,24 @@ begin
 	-- The true unsung heros
 	-- List of users with more than 10 zero score answers, ordered by ratio of zero to non zero score
 	select X.*, u.Reputation from (
-	  select a.OwnerUserId [User Link], 
-	  sum(case when a.Score = 0 then 0 else 1 end) as [Non Zero Score Answers],  
+	  select a.OwnerUserId [User Link],
+	  sum(case when a.Score = 0 then 0 else 1 end) as [Non Zero Score Answers],
 	  sum(case when a.Score = 0 then 1 else 0 end) as [Zero Score Answers]
 	from Posts q
-	join Posts a on a.Id = q.AcceptedAnswerId 
+	join Posts a on a.Id = q.AcceptedAnswerId
 	where a.CommunityOwnedDate is null and a.OwnerUserId is not null
 	 and a.OwnerUserId <> isnull(q.OwnerUserId,-1)
 	group by a.OwnerUserId
 	having sum(case when a.Score = 0 then 1 else 0 end) > 10
-	) as X 
+	) as X
 	join Users u on u.Id = [User Link]
 	order by ([Zero Score Answers]+ 0.0) / ([Zero Score Answers]+ [Non Zero Score Answers]+ 0.0) desc
 end
-
-
-
-
 GO
 
-create or alter procedure dbo.usp_Q1080
-as
+
+
+create or alter procedure dbo.usp_Q1080 @Useless INT AS
 begin
 
 	/*
@@ -1232,11 +1177,9 @@ begin
 	ORDER BY
 	  BountiesWon DESC
 end
-
-
-
-
 GO
+
+
 
 create or alter procedure dbo.usp_Q6134 @months tinyint = 12
 as
@@ -1250,7 +1193,7 @@ begin
 	-- Total Questions and Answers per Month for the last 12
 	-- Total number of questions and answers for the last 12 months (in 30 day chunks)
 
-	set nocount on 
+	set nocount on
 
 	create table #ranges (Id int identity, [start] datetime, [finish] datetime)
 
@@ -1260,33 +1203,30 @@ begin
 
 	declare @oldestPost dateTime
 
-	select @oldestPost = CreationDate from Posts 
+	select @oldestPost = CreationDate from Posts
 	where Id = (select max(p2.Id) from Posts p2)
 
-	-- look at 30 day chunks, so stats remain fairly accurate 
+	-- look at 30 day chunks, so stats remain fairly accurate
 	-- (month will depend on days per month)
 
-	update #ranges 
-	  set 
+	update #ranges
+	  set
 	   [start] = DateAdd(d, (0 - Id) * 30, @oldestPost),
 	   [finish] = DateAdd(d, (1 - Id) * 30, @oldestPost)
 
 
 
-	select start, (select count(*) from Posts where ParentId is null 
+	select start, (select count(*) from Posts where ParentId is null
 	   and CreationDate between [start] and [finish] ) as [Total Questions],
-		(select count(*) from Posts where ParentId is not null 
+		(select count(*) from Posts where ParentId is not null
 	   and CreationDate between [start] and [finish] ) as [Total Answers]
 	from #ranges
 end
-
-
-
-
 GO
 
-create or alter procedure dbo.usp_Q2777
-as
+
+
+create or alter procedure dbo.usp_Q2777 @Useless INT AS
 begin
 
 	/*
@@ -1324,14 +1264,11 @@ begin
 	where BadgeCount >= 10
 	order by [Ratio] desc;
 end
-
-
-
-
 GO
 
-create or alter procedure dbo.usp_Q1933
-as
+
+
+create or alter procedure dbo.usp_Q1933 @Useless INT AS
 begin
 
 	/*
@@ -1341,17 +1278,17 @@ begin
 -- https://data.stackexchange.com/stackoverflow/query/1933/users-with-high-self-accept-rates-and-having-10-answers
 	--Users with high self-accept rates (and having > 10 answers)
 	-- (the extreme self-learners)
-	SELECT 
+	SELECT
 		TOP 100
 		Users.Id AS [User Link],
 		(CAST(Count(a.Id) AS float) / CAST((SELECT Count(*) FROM Posts p WHERE p.OwnerUserId = Users.Id AND PostTypeId = 1) AS float) * 100) AS SelfAnswerPercentage
 	FROM
 		Posts q
-	  INNER JOIN 
+	  INNER JOIN
 		Posts a ON q.AcceptedAnswerId = a.Id
 	  INNER JOIN
 		Users ON Users.Id = q.OwnerUserId
-	WHERE 
+	WHERE
 		q.OwnerUserId = a.OwnerUserId
 	GROUP BY
 		Users.Id, DisplayName
@@ -1360,11 +1297,9 @@ begin
 	ORDER BY
 		SelfAnswerPercentage DESC
 end
-
-
-
-
 GO
+
+
 
 create or alter procedure dbo.usp_Q1181 @UserId int, @StartDate date, @EndDate date
 as
@@ -1416,3 +1351,48 @@ end
 GO
 
 
+
+IF OBJECT_ID('dbo.usp_RandomQ') IS NULL
+  EXEC ('CREATE PROCEDURE dbo.usp_RandomQ AS RETURN 0;')
+GO
+
+ALTER PROCEDURE dbo.usp_RandomQ WITH RECOMPILE
+AS
+SET NOCOUNT ON
+
+DECLARE @Id INT = CAST(RAND() * 10000000 AS INT);
+
+IF @Id % 30 = 0 EXEC dbo.usp_Q7521 @Id
+ELSE IF @Id % 29 = 0 EXEC dbo.usp_Q36660 @Id
+ELSE IF @Id % 28 = 0 EXEC dbo.usp_Q949 @Id
+ELSE IF @Id % 27 = 0 EXEC dbo.usp_Q466 @Id
+ELSE IF @Id % 26 = 0 EXEC dbo.usp_Q947 @Id
+ELSE IF @Id % 25 = 0 EXEC dbo.usp_Q3160 @Id
+ELSE IF @Id % 24 = 0 EXEC dbo.usp_Q6627 @Id
+ELSE IF @Id % 23 = 0 EXEC dbo.usp_Q6772 @Id
+ELSE IF @Id % 22 = 0 EXEC dbo.usp_Q6856 @Id
+ELSE IF @Id % 21 = 0 EXEC dbo.usp_Q952 @Id
+ELSE IF @Id % 20 = 0 EXEC dbo.usp_Q975 @Id
+ELSE IF @Id % 19 = 0 EXEC dbo.usp_Q8116 @Id
+ELSE IF @Id % 18 = 0 EXEC dbo.usp_Q4038 @Id
+ELSE IF @Id % 17 = 0 EXEC dbo.usp_Q2357 @Id
+ELSE IF @Id % 16 = 0 EXEC dbo.usp_Q951 @Id
+ELSE IF @Id % 15 = 0 EXEC dbo.usp_Q1433 @Id
+ELSE IF @Id % 14 = 0 EXEC dbo.usp_Q7672 @Id
+ELSE IF @Id % 13 = 0 EXEC dbo.usp_Q1075286 @Id
+ELSE IF @Id % 12 = 0 EXEC dbo.usp_Q1256 @Id
+ELSE IF @Id % 11 = 0 EXEC dbo.usp_Q877 @Id
+ELSE IF @Id % 10 = 0 EXEC dbo.usp_Q886 @Id
+ELSE IF @Id % 9 = 0 EXEC dbo.usp_Q1075285 @Id
+ELSE IF @Id % 8 = 0 EXEC dbo.usp_Q10418 'Teacher'
+ELSE IF @Id % 7 = 0 EXEC dbo.usp_Q946 @Id
+ELSE IF @Id % 6 = 0 EXEC dbo.usp_Q6607 @Id
+ELSE IF @Id % 5 = 0 EXEC dbo.usp_Q1080 @Id
+ELSE IF @Id % 4 = 0 EXEC dbo.usp_Q6134 12
+ELSE IF @Id % 3 = 0 EXEC dbo.usp_Q2777 @Id
+ELSE IF @Id % 2 = 0 EXEC dbo.usp_Q1933 @Id
+ELSE
+    EXEC dbo.usp_Q1181 @Id, '2010-01-01', '2020-01-01'
+GO
+
+--EXEC dbo.usp_RandomQ;
