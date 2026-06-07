@@ -49,20 +49,25 @@ begin
     print 'Populating dbo.Tags table...';
 
     declare @_BatchSize bigint = 1000;
-    declare @_BatchCount bigint = (select count(*) from dbo.Posts)/@_BatchSize;
-    declare @_CurrentBatch bigint = 0;
+    declare @_BatchCount bigint = ((select count(*) from dbo.Posts)/@_BatchSize)+1;
+    declare @_CurrentBatch bigint = 1;
+    declare @_StartId bigint = 0;
+    declare @_EndId bigint = 0;
 
     while @_CurrentBatch <= @_BatchCount
     begin
-        print 'Processing batch ' + cast(@_CurrentBatch as varchar) + ' of ' + cast(@_BatchCount as varchar);
+        set @_StartId = (@_CurrentBatch-1)*@_BatchSize;
+        set @_EndId = @_StartId + @_BatchSize - 1;
+        print 'Processing "dbo.Tags" batch ' + cast(@_CurrentBatch as varchar) + ' of ' + cast(@_BatchCount as varchar);
+        print '  Processing Id '+convert(varchar(10),@_StartId)+' to '+convert(varchar(10), @_EndId);
 
         ;WITH tags AS
         (
-            SELECT TagName = value
+            SELECT TagName = ltrim(rtrim(value))
             FROM dbo.Posts p
             CROSS APPLY STRING_SPLIT(TRANSLATE(p.Tags, '<>', '  '),' ')
             WHERE p.Tags IS NOT NULL
-            and p.Id BETWEEN (@_CurrentBatch * @_BatchSize) AND ((@_CurrentBatch + 1) * @_BatchSize)
+            and p.Id BETWEEN @_StartId AND @_EndId
         )
         INSERT dbo.Tags (TagName)
         SELECT DISTINCT TagName
@@ -111,7 +116,7 @@ begin
     begin
         set @_StartId = (@_CurrentBatch-1)*@_BatchSize;
         set @_EndId = @_StartId + @_BatchSize - 1;
-        print 'Processing batch ' + cast(@_CurrentBatch as varchar) + ' of ' + cast(@_BatchCount as varchar);
+        print 'Processing "dbo.PostTags" batch ' + cast(@_CurrentBatch as varchar) + ' of ' + cast(@_BatchCount as varchar);
         print '  Processing Id '+convert(varchar(10),@_StartId)+' to '+convert(varchar(10), @_EndId);
 
         ;WITH tags AS
