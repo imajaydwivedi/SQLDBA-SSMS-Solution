@@ -49,6 +49,7 @@ parts/
 var/
 *.so
 MANIFEST
+vault-pass
 
 # Virtual environments
 venv/
