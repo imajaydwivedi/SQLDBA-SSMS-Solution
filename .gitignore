@@ -28,6 +28,7 @@ Untitled*.txt
 .venv
 .private
 .temp
+*/.augment/*
 
 # Python
 __pycache__/
