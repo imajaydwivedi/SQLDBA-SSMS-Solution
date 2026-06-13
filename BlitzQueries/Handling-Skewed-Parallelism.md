@@ -6,9 +6,14 @@
 ## Possible Solutions
 - [Snake Draft Sorting in SQLServer](https://www.red-gate.com/simple-talk/databases/sql-server/t-sql-programming-sql-server/snake-draft-sorting-in-sql-server-part-1/)
 - [Forcing Repartition Using TOP Clause In SQL Server](https://www.youtube.com/watch?v=l8mZheh5-co)
+  - **TOP** operator forces a serial zone that SQLServer needs to resolve by introducing **Distribute Streams** after it.
 - [Fixing Parallel Plan Row Skew With VALUES Clause](https://www.youtube.com/watch?v=pQ4K0P69SAU&t=4s)
 - Forcing Parallel plan using dbo.make_parallel()
-- 
+- **[Parallel Sort](https://www.youtube.com/watch?v=HLGQlSj2ucY&list=PLFUGPe1byxet0UYXvK0qSwo0EdS8h-r67&index=30)** - Divide the large dataset sort into multiple sorts of smaller set of rows, and join with UNION ALL.
+  - Are cheaper, memory efficient, and avoid tempdb spill
+- **[Partial Aggregation](https://www.youtube.com/watch?v=HLGQlSj2ucY&list=PLFUGPe1byxet0UYXvK0qSwo0EdS8h-r67&index=30)** - `select max(val) from tbl group by ProductId`
+  - Do some work for each product, then merge the results
+- **[]()** - 
 
 ![**Parallel Scan: Master of Skew**](images/parallel-scan--master-of-skew.png)
 
