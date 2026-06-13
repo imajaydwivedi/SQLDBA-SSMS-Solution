@@ -1,12 +1,7 @@
 {
   "Version": 1,
   "WorkspaceRootPath": "E:\\Github\\SQLDBA-SSMS-Solution\\",
-  "Documents": [
-    {
-      "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
-    }
-  ],
+  "Documents": [],
   "DocumentGroupContainers": [
     {
       "Orientation": 0,
@@ -14,20 +9,8 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 0,
+          "SelectedChildIndex": -1,
           "Children": [
-            {
-              "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "QRY-sp_WhoIsActive-Usages.sql - (local).StackOverflow2013 (LAB\\adwivedi (96))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
-              "RelativeDocumentMoniker": "BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
-              "ToolTip": "QRY-sp_WhoIsActive-Usages.sql - (local).StackOverflow2013 (LAB\\adwivedi (96))",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-06-07T11:07:05.018Z",
-              "IsPinned": true,
-              "EditorCaption": " - (local).StackOverflow2013 (LAB\\adwivedi (96))"
-            },
             {
               "$type": "Bookmark",
               "Name": "ST:0:0:{dc370b2d-b95e-4609-85c7-9e85fcd5539a}"

@@ -3,20 +3,20 @@
   "WorkspaceRootPath": "E:\\Github\\SQLDBA-SSMS-Solution\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{3EC2A162-B1E8-492C-97D4-6C97A7D43E9A}|StackOverflow\\StackOverflow.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\StackOverflow\\Setup-RandomQ--Many-Procs.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{3EC2A162-B1E8-492C-97D4-6C97A7D43E9A}|StackOverflow\\StackOverflow.ssmssqlproj|solutionrelative:StackOverflow\\Setup-RandomQ--Many-Procs.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{3EC2A162-B1E8-492C-97D4-6C97A7D43E9A}|StackOverflow\\StackOverflow.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\StackOverflow\\Setup-RandomQ--Original.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{3EC2A162-B1E8-492C-97D4-6C97A7D43E9A}|StackOverflow\\StackOverflow.ssmssqlproj|solutionrelative:StackOverflow\\Setup-RandomQ--Original.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
+      "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\RingBuffer-PerfMon-CPU-Memory.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
+      "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\RingBuffer-PerfMon-CPU-Memory.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
       "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{3EC2A162-B1E8-492C-97D4-6C97A7D43E9A}|StackOverflow\\StackOverflow.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\StackOverflow\\Help.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
-      "RelativeMoniker": "D:0:0:{3EC2A162-B1E8-492C-97D4-6C97A7D43E9A}|StackOverflow\\StackOverflow.ssmssqlproj|solutionrelative:StackOverflow\\Help.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
+      "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\BlitzCache.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
+      "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\BlitzCache.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\__Diagnostic-Queries.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}",
+      "RelativeMoniker": "D:0:0:{34D3C094-4DA1-4402-BCC7-D7D3C964B2AD}|BlitzQueries\\BlitzQueries.ssmssqlproj|solutionrelative:BlitzQueries\\__Diagnostic-Queries.sql||{B5A506EB-11BE-4782-9A18-21265C2CA0B4}"
     }
   ],
   "DocumentGroupContainers": [
@@ -26,43 +26,55 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 1,
+          "SelectedChildIndex": 2,
           "Children": [
             {
               "$type": "Document",
               "DocumentIndex": 1,
-              "Title": "Setup-RandomQ--Original.sql - (local).master (LAB\\adwivedi (78))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\StackOverflow\\Setup-RandomQ--Original.sql",
-              "RelativeDocumentMoniker": "StackOverflow\\Setup-RandomQ--Original.sql",
-              "ToolTip": "Setup-RandomQ--Original.sql - (local).master (LAB\\adwivedi (78))",
+              "Title": "QRY-sp_WhoIsActive-Usages.sql - (local).DBA (LAB\\adwivedi (101))",
+              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
+              "RelativeDocumentMoniker": "BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
+              "ToolTip": "QRY-sp_WhoIsActive-Usages.sql - (local).DBA (LAB\\adwivedi (101))",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-06-07T14:59:06.344Z",
+              "WhenOpened": "2026-06-07T11:07:05.018Z",
               "IsPinned": true,
-              "EditorCaption": " - (local).master (LAB\\adwivedi (78))"
+              "EditorCaption": " - (local).DBA (LAB\\adwivedi (101))"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "__Diagnostic-Queries.sql - (local).DBA (LAB\\adwivedi (93))",
+              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\__Diagnostic-Queries.sql",
+              "RelativeDocumentMoniker": "BlitzQueries\\__Diagnostic-Queries.sql",
+              "ToolTip": "__Diagnostic-Queries.sql - (local).DBA (LAB\\adwivedi (93))",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
+              "WhenOpened": "2026-06-08T02:05:42.515Z",
+              "IsPinned": true,
+              "EditorCaption": " - (local).DBA (LAB\\adwivedi (93))"
             },
             {
               "$type": "Document",
               "DocumentIndex": 0,
-              "Title": "Setup-RandomQ--Many-Procs.sql - localhost.StackOverflowMini (LAB\\adwivedi (59))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\StackOverflow\\Setup-RandomQ--Many-Procs.sql",
-              "RelativeDocumentMoniker": "StackOverflow\\Setup-RandomQ--Many-Procs.sql",
-              "ToolTip": "Setup-RandomQ--Many-Procs.sql - localhost.StackOverflowMini (LAB\\adwivedi (59))",
+              "Title": "RingBuffer-PerfMon-CPU-Memory.sql - (local).master (LAB\\adwivedi (107))",
+              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\RingBuffer-PerfMon-CPU-Memory.sql",
+              "RelativeDocumentMoniker": "BlitzQueries\\RingBuffer-PerfMon-CPU-Memory.sql",
+              "ToolTip": "RingBuffer-PerfMon-CPU-Memory.sql - (local).master (LAB\\adwivedi (107))",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-06-07T14:58:26.415Z",
+              "WhenOpened": "2026-06-08T02:08:05.896Z",
               "IsPinned": true,
-              "EditorCaption": " - localhost.StackOverflowMini (LAB\\adwivedi (59))"
+              "EditorCaption": " - (local).master (LAB\\adwivedi (107))"
             },
             {
               "$type": "Document",
               "DocumentIndex": 2,
-              "Title": "QRY-sp_WhoIsActive-Usages.sql - (local).StackOverflow2013 (LAB\\adwivedi (96))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
-              "RelativeDocumentMoniker": "BlitzQueries\\QRY-sp_WhoIsActive-Usages.sql",
-              "ToolTip": "QRY-sp_WhoIsActive-Usages.sql - (local).StackOverflow2013 (LAB\\adwivedi (96))",
+              "Title": "BlitzCache.sql - (local).DBA (LAB\\adwivedi (102))",
+              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\BlitzQueries\\BlitzCache.sql",
+              "RelativeDocumentMoniker": "BlitzQueries\\BlitzCache.sql",
+              "ToolTip": "BlitzCache.sql - (local).DBA (LAB\\adwivedi (102))",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-06-07T11:07:05.018Z",
+              "WhenOpened": "2026-06-08T03:33:00.138Z",
               "IsPinned": true,
-              "EditorCaption": " - (local).StackOverflow2013 (LAB\\adwivedi (96))"
+              "EditorCaption": " - (local).DBA (LAB\\adwivedi (102))"
             },
             {
               "$type": "Bookmark",
@@ -71,17 +83,6 @@
             {
               "$type": "Bookmark",
               "Name": "ST:0:0:{1c4feeaa-4718-4aa9-859d-94ce25d182ba}"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 3,
-              "Title": "Help.sql - SqlBuntu.master (sa (85))",
-              "DocumentMoniker": "E:\\Github\\SQLDBA-SSMS-Solution\\StackOverflow\\Help.sql",
-              "RelativeDocumentMoniker": "StackOverflow\\Help.sql",
-              "ToolTip": "Help.sql - SqlBuntu.master (sa (85))",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000826|",
-              "WhenOpened": "2026-06-07T03:20:48.854Z",
-              "EditorCaption": " - SqlBuntu.master (sa (85))"
             }
           ]
         }

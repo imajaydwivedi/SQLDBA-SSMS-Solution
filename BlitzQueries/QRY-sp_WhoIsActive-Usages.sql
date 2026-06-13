@@ -20,10 +20,12 @@ EXEC sp_WhoIsActive @get_outer_command = 1, @get_task_info=2, @get_additional_in
 -- kill 141
 
 /*
+-- Install sp_BlitzWho - https://github.com/BrentOzarULTD/SQL-Server-First-Responder-Kit/blob/dev/Install-Azure.sql
+exec sp_BlitzWho @GetLiveQueryPlan=1, @ShowActualParameters = 1;
+
 -- Process to Tune Queries: BE CREEPY
 brentozar.com/go/tunequeries
 	
-
 -- Enable LIVE Query Plans
 DBCC TRACESTATUS(7412);
 DBCC TRACEON(7412, -1);
@@ -32,11 +34,9 @@ DBCC TRACEOFF(7412, -1);
 -- Last Actual Plan Cache
 ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;
 or
+exec master..sp_MSforeachdb 'USE [?]; ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;';
+or
 DBCC TRACEON(2451, -1);
-
-
--- Install sp_BlitzWho - https://github.com/BrentOzarULTD/SQL-Server-First-Responder-Kit/blob/dev/Install-Azure.sql
-exec sp_BlitzWho @GetLiveQueryPlan=1
 
 --Get the execution plan and current progress for session 159
 select * from sys.dm_exec_query_statistics_xml(159);
